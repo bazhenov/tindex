@@ -44,30 +44,6 @@ struct Intersect {
     b: Box<dyn PostingList>,
 }
 
-impl Iterator for Merge {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        <Self as PostingList>::next(self)
-    }
-}
-
-impl Iterator for Intersect {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        <Self as PostingList>::next(self)
-    }
-}
-
-impl Iterator for RangePostingList {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        <Self as PostingList>::next(self)
-    }
-}
-
 impl PostingList for Merge {
     fn next(&mut self) -> Option<u64> {
         loop {
@@ -129,6 +105,19 @@ impl PostingList for RangePostingList {
         self.0.next()
     }
 }
+
+macro_rules! impl_Iterator {
+    (for $($t:ty),+) => {
+        $(impl Iterator for $t {
+            type Item = u64;
+            fn next(&mut self) -> Option<Self::Item> {
+                <Self as PostingList>::next(self)
+            }
+        })*
+    }
+}
+
+impl_Iterator!(for Merge, Intersect, RangePostingList);
 
 #[cfg(test)]
 mod test {
