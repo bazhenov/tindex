@@ -24,19 +24,10 @@ trait PostingList: Iterator<Item = u64> {
         B: PostingList + 'static,
     {
         Merge {
-            a: Box::new(self),
-            b: Box::new(b),
-            a_value: None,
-            b_value: None,
+            a: Peekable::new(Box::new(self)),
+            b: Peekable::new(Box::new(b)),
         }
     }
-}
-
-struct Merge {
-    a: Box<dyn PostingList>,
-    b: Box<dyn PostingList>,
-    a_value: Option<u64>,
-    b_value: Option<u64>
 }
 
 struct Intersect {
@@ -44,28 +35,54 @@ struct Intersect {
     b: Box<dyn PostingList>,
 }
 
+struct Peekable<T>(T, Option<u64>);
+
+impl<T: AsMut<dyn PostingList>> Peekable<T> {
+    fn new(mut inner: T) -> Self {
+        let value = PostingList::next(inner.as_mut());
+        Self(inner, value)
+    }
+
+    fn value(&self) -> Option<u64> {
+        self.1
+    }
+
+    fn move_next(&mut self) -> Option<u64> {
+        self.1 = PostingList::next(self.0.as_mut());
+        self.1
+    }
+}
+
+struct Merge {
+    a: Peekable<Box<dyn PostingList>>,
+    b: Peekable<Box<dyn PostingList>>,
+}
+
 impl PostingList for Merge {
     fn next(&mut self) -> Option<u64> {
-        loop {
-            let a = self.a_value.take().or_else(|| self.a.next());
-            let b = self.b_value.take().or_else(|| self.b.next());
-
-            match (a, b) {
-                (Some(a), Some(b)) => {
-                    if a == b {
-                        return Some(a);
-                    } else if a < b {
-                        self.b_value.replace(b);
-                        return Some(a);
-                    } else {
-                        self.a_value.replace(a);
-                        return Some(b);
-                    }
+        match (self.a.value(), self.b.value()) {
+            (Some(a), Some(b)) => {
+                if a == b {
+                    self.a.move_next();
+                    self.b.move_next();
+                    Some(a)
+                } else if a < b {
+                    self.a.move_next();
+                    Some(a)
+                } else {
+                    self.b.move_next();
+                    Some(b)
                 }
-                (Some(a), None) => return Some(a),
-                (None, Some(b)) => return Some(b),
-                (None, None) => return None,
             }
+            (Some(a), None) => {
+                self.a.move_next();
+                Some(a)
+            }
+            (None, Some(b)) => {
+                self.b.move_next();
+                Some(b)
+            }
+            (None, None) => None,
         }
     }
 }
