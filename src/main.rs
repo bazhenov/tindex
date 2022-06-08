@@ -1,85 +1,62 @@
-use std::ops::Range;
+use std::{cmp::Ordering, iter::Peekable, ops::Range};
 
 fn main() {
     println!("Hello, world!");
 }
 
-trait PostingList: Iterator<Item = u64> {
-    fn next(&mut self) -> Option<u64>;
+trait PostingList: Iterator<Item = u64> {}
+impl<T: Iterator<Item = u64>> PostingList for T {}
 
-    fn intersect<B>(self, b: B) -> Intersect
-    where
-        Self: Sized + 'static,
-        B: PostingList + 'static,
-    {
-        Intersect {
-            a: Box::new(self),
-            b: Box::new(b),
-        }
-    }
+fn intersect<A, B>(a: A, b: B) -> Intersect
+where
+    A: PostingList + 'static,
+    B: PostingList + 'static,
+{
+    let a: Box<dyn PostingList> = Box::new(a);
+    let b: Box<dyn PostingList> = Box::new(b);
 
-    fn merge<B>(self, b: B) -> Merge
-    where
-        Self: Sized + 'static,
-        B: PostingList + 'static,
-    {
-        Merge {
-            a: Peekable::new(Box::new(self)),
-            b: Peekable::new(Box::new(b)),
-        }
-    }
+    Intersect(a.peekable(), b.peekable())
 }
 
-struct Intersect {
-    a: Box<dyn PostingList>,
-    b: Box<dyn PostingList>,
+fn merge<A, B>(a: A, b: B) -> Merge
+where
+    A: PostingList + 'static,
+    B: PostingList + 'static,
+{
+    let a: Box<dyn PostingList> = Box::new(a);
+    let b: Box<dyn PostingList> = Box::new(b);
+    Merge(a.peekable(), b.peekable())
 }
 
-struct Peekable<T>(T, Option<u64>);
+struct Merge(
+    Peekable<Box<dyn PostingList>>,
+    Peekable<Box<dyn PostingList>>,
+);
 
-impl<T: AsMut<dyn PostingList>> Peekable<T> {
-    fn new(mut inner: T) -> Self {
-        let value = PostingList::next(inner.as_mut());
-        Self(inner, value)
-    }
+impl Iterator for Merge {
+    type Item = u64;
 
-    fn value(&self) -> Option<u64> {
-        self.1
-    }
-
-    fn move_next(&mut self) -> Option<u64> {
-        self.1 = PostingList::next(self.0.as_mut());
-        self.1
-    }
-}
-
-struct Merge {
-    a: Peekable<Box<dyn PostingList>>,
-    b: Peekable<Box<dyn PostingList>>,
-}
-
-impl PostingList for Merge {
     fn next(&mut self) -> Option<u64> {
-        match (self.a.value(), self.b.value()) {
+        match (self.0.peek().cloned(), self.1.peek().cloned()) {
             (Some(a), Some(b)) => {
                 if a == b {
-                    self.a.move_next();
-                    self.b.move_next();
+                    self.0.next();
+                    self.1.next();
                     Some(a)
                 } else if a < b {
-                    self.a.move_next();
+                    self.0.next();
                     Some(a)
                 } else {
-                    self.b.move_next();
+                    self.1.next();
                     Some(b)
                 }
             }
             (Some(a), None) => {
-                self.a.move_next();
+                self.0.next();
                 Some(a)
             }
             (None, Some(b)) => {
-                self.b.move_next();
+                self.1.next();
                 Some(b)
             }
             (None, None) => None,
@@ -87,54 +64,40 @@ impl PostingList for Merge {
     }
 }
 
-impl PostingList for Intersect {
+struct Intersect(
+    Peekable<Box<dyn PostingList>>,
+    Peekable<Box<dyn PostingList>>,
+);
+
+impl Iterator for Intersect {
+    type Item = u64;
+
     fn next(&mut self) -> Option<u64> {
-        let mut a_value = None;
-        let mut b_value = None;
-        loop {
-            let a = a_value.take().or_else(|| self.a.next());
-            let b = b_value.take().or_else(|| self.b.next());
-
-            match (a, b) {
-                (Some(a), Some(b)) => {
-                    if a == b {
-                        return Some(a);
-                    } else if a > b {
-                        a_value.replace(a);
-                    } else {
-                        b_value.replace(b);
-                    }
+        while let (Some(a), Some(b)) = (self.0.peek(), self.1.peek()) {
+            match a.cmp(b) {
+                Ordering::Less => self.0.next(),
+                Ordering::Greater => self.1.next(),
+                Ordering::Equal => {
+                    let value = *a;
+                    self.0.next();
+                    self.1.next();
+                    return Some(value);
                 }
-                (_, _) => return None,
-            }
+            };
         }
+        return None;
     }
-}
-
-fn range(r: Range<u64>) -> impl PostingList {
-    RangePostingList(r)
 }
 
 struct RangePostingList(Range<u64>);
 
-impl PostingList for RangePostingList {
+impl Iterator for RangePostingList {
+    type Item = u64;
+
     fn next(&mut self) -> Option<u64> {
         self.0.next()
     }
 }
-
-macro_rules! impl_Iterator {
-    (for $($t:ty),+) => {
-        $(impl Iterator for $t {
-            type Item = u64;
-            fn next(&mut self) -> Option<Self::Item> {
-                <Self as PostingList>::next(self)
-            }
-        })*
-    }
-}
-
-impl_Iterator!(for Merge, Intersect, RangePostingList);
 
 #[cfg(test)]
 mod test {
@@ -142,20 +105,20 @@ mod test {
 
     #[test]
     fn check_intersect() {
-        let a = range(0..5);
-        let b = range(2..7);
+        let a = RangePostingList(0..5);
+        let b = RangePostingList(2..7);
 
-        let i = a.intersect(b);
+        let i = intersect(a, b);
         let values = i.collect::<Vec<_>>();
         assert_eq!(values, vec![2, 3, 4]);
     }
 
     #[test]
     fn check_merge() {
-        let a = range(0..3);
-        let b = range(2..5);
+        let a = RangePostingList(0..3);
+        let b = RangePostingList(2..5);
 
-        let i = a.merge(b);
+        let i = merge(a, b);
         let values = i.collect::<Vec<_>>();
         assert_eq!(values, vec![0, 1, 2, 3, 4]);
     }
