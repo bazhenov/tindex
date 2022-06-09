@@ -24,6 +24,16 @@ where
     Merge(a.peekable(), b.peekable())
 }
 
+pub fn exclude<A, B>(a: A, b: B) -> Exclude
+where
+    A: PostingList + 'static,
+    B: PostingList + 'static,
+{
+    let a: Box<dyn PostingList> = Box::new(a);
+    let b: Box<dyn PostingList> = Box::new(b);
+    Exclude(a.peekable(), b.peekable())
+}
+
 pub struct Merge(
     Peekable<Box<dyn PostingList>>,
     Peekable<Box<dyn PostingList>>,
@@ -85,11 +95,43 @@ impl Iterator for Intersect {
     }
 }
 
+pub struct Exclude(
+    Peekable<Box<dyn PostingList>>,
+    Peekable<Box<dyn PostingList>>,
+);
+
+impl Iterator for Exclude {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<u64> {
+        while let Some(a) = self.0.peek() {
+            if let Some(b) = self.1.peek() {
+                match a.cmp(b) {
+                    Ordering::Less => {
+                        let value = *a;
+                        self.0.next();
+                        return Some(value);
+                    }
+                    Ordering::Greater => {
+                        self.1.next();
+                    }
+                    Ordering::Equal => {
+                        self.0.next();
+                        self.1.next();
+                    }
+                };
+            } else {
+                return self.0.next();
+            }
+        }
+        return None;
+    }
+}
+
 #[derive(Clone)]
 pub struct RangePostingList(pub Range<u64>);
 
 impl RangePostingList {
-    
     pub fn len(&self) -> u64 {
         self.0.end - self.0.start
     }
@@ -125,5 +167,15 @@ mod test {
         let i = merge(a, b);
         let values = i.collect::<Vec<_>>();
         assert_eq!(values, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn check_exclude() {
+        let a = RangePostingList(0..6);
+        let b = RangePostingList(2..4);
+
+        let i = exclude(a, b);
+        let values = i.collect::<Vec<_>>();
+        assert_eq!(values, vec![0, 1, 4, 5]);
     }
 }
