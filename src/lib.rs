@@ -85,7 +85,15 @@ impl Iterator for Intersect {
     }
 }
 
+#[derive(Clone)]
 pub struct RangePostingList(pub Range<u64>);
+
+impl RangePostingList {
+    
+    pub fn len(&self) -> u64 {
+        self.0.end - self.0.start
+    }
+}
 
 impl Iterator for RangePostingList {
     type Item = u64;
