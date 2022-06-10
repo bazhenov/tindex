@@ -4,22 +4,26 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::str::FromStr;
 
-trait Encoder {
-    fn write(&mut self, values: impl Iterator<Item = u64>) -> IoResult<()>;
+pub trait Encoder {
+    fn write_values(&mut self, values: impl Iterator<Item = u64>) -> IoResult<()> {
+        for value in values {
+            self.write(value)?;
+        }
+        Ok(())
+    }
+
+    fn write(&mut self, value: u64) -> IoResult<()>;
 }
 
-trait Decoder {
+pub trait Decoder {
     fn read(&mut self) -> Result<Option<u64>>;
 }
 
-pub struct PlainTextEncoder(File);
+pub struct PlainTextEncoder(pub File);
 
 impl Encoder for PlainTextEncoder {
-    fn write(&mut self, values: impl Iterator<Item = u64>) -> IoResult<()> {
-        for value in values {
-            writeln!(&mut self.0, "{}", value)?;
-        }
-        Ok(())
+    fn write(&mut self, value: u64) -> IoResult<()> {
+        writeln!(&mut self.0, "{}", value)
     }
 }
 
@@ -54,7 +58,7 @@ mod tests {
         let path = dir.path().join("plaintext.txt");
 
         let mut text = PlainTextEncoder(File::create(&path)?);
-        text.write(0..10)?;
+        text.write_values(0..10)?;
 
         let mut text = PlainTextDecoder::open(&path)?;
 

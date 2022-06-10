@@ -1,8 +1,8 @@
 use std::{cmp::Ordering, iter::Peekable, ops::Range};
 
-mod encoding;
+pub mod encoding;
 
-mod prelude {
+pub mod prelude {
     pub type Result<T> = anyhow::Result<T>;
     pub type IoResult<T> = std::io::Result<T>;
 }
