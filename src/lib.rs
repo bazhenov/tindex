@@ -51,19 +51,21 @@ impl Iterator for Merge {
 
     fn next(&mut self) -> Option<u64> {
         match (self.0.peek().cloned(), self.1.peek().cloned()) {
-            (Some(a), Some(b)) => {
-                if a == b {
+            (Some(a), Some(b)) => match a.cmp(&b) {
+                Ordering::Equal => {
                     self.0.next();
                     self.1.next();
                     Some(a)
-                } else if a < b {
+                }
+                Ordering::Less => {
                     self.0.next();
                     Some(a)
-                } else {
+                }
+                Ordering::Greater => {
                     self.1.next();
                     Some(b)
                 }
-            }
+            },
             (Some(a), None) => {
                 self.0.next();
                 Some(a)
@@ -98,7 +100,7 @@ impl Iterator for Intersect {
                 }
             };
         }
-        return None;
+        None
     }
 }
 
@@ -131,7 +133,7 @@ impl Iterator for Exclude {
                 return self.0.next();
             }
         }
-        return None;
+        None
     }
 }
 

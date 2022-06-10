@@ -39,7 +39,7 @@ impl Decoder for PlainTextDecoder {
             return Ok(None);
         }
         let n = u64::from_str(line.trim_end())?;
-        return Ok(Some(n));
+        Ok(Some(n))
     }
 }
 
