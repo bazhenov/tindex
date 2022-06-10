@@ -1,5 +1,12 @@
 use std::{cmp::Ordering, iter::Peekable, ops::Range};
 
+mod encoding;
+
+mod prelude {
+    pub type Result<T> = anyhow::Result<T>;
+    pub type IoResult<T> = std::io::Result<T>;
+}
+
 pub trait PostingList: Iterator<Item = u64> {}
 impl<T: Iterator<Item = u64>> PostingList for T {}
 
@@ -146,7 +153,7 @@ impl Iterator for RangePostingList {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

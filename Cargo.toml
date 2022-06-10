@@ -6,6 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.57"
+tempfile = "3.3.0"
+thiserror = "1.0.31"
 
 [dev-dependencies]
 criterion = "0.3"
