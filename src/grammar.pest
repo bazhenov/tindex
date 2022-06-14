@@ -1,0 +1,14 @@
+WHITESPACE = _{ " " }
+
+ALPHA = { 'a'..'z' | 'A'..'Z' }
+DIGIT = { '0'..'9' }
+
+ident = { ALPHA ~ (ALPHA | DIGIT)* }
+
+intersect = { ident ~ "&" ~ ident }
+merge = { ident ~ "|" ~ ident }
+exclude = { ident ~ "-" ~ ident }
+
+expression = { ("(" ~ expression ~ ")" | ident) ~ (("&" | "|" | "-") ~ expression)* }
+
+root = { SOI ~ expression ~ EOI }

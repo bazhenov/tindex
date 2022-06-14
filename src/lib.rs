@@ -1,7 +1,12 @@
+extern crate pest;
+#[macro_use]
+extern crate pest_derive;
+
 use prelude::*;
 use std::{cmp::Ordering, ops::Range};
 
 pub mod encoding;
+pub mod query;
 
 pub mod prelude {
     pub type Result<T> = anyhow::Result<T>;
