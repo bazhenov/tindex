@@ -1,5 +1,5 @@
 use prelude::*;
-use std::{cmp::Ordering, iter::Peekable, ops::Range};
+use std::{cmp::Ordering, ops::Range};
 
 pub mod encoding;
 
@@ -8,7 +8,9 @@ pub mod prelude {
     pub type IoResult<T> = std::io::Result<T>;
 }
 
-pub trait PostingList: Iterator<Item = u64> {
+pub trait PostingList {
+    fn next(&mut self) -> Option<u64>;
+
     fn to_vec(mut self) -> Result<Vec<u64>>
     where
         Self: Sized,
@@ -20,7 +22,6 @@ pub trait PostingList: Iterator<Item = u64> {
         Ok(result)
     }
 }
-impl<T: Iterator<Item = u64>> PostingList for T {}
 
 pub fn intersect<A, B>(a: A, b: B) -> impl PostingList
 where
@@ -30,7 +31,10 @@ where
     let a: Box<dyn PostingList> = Box::new(a);
     let b: Box<dyn PostingList> = Box::new(b);
 
-    Intersect(a.peekable(), b.peekable())
+    Intersect(
+        PositionedPostingList(a, None),
+        PositionedPostingList(b, None),
+    )
 }
 
 pub fn merge<A, B>(a: A, b: B) -> impl PostingList
@@ -40,7 +44,10 @@ where
 {
     let a: Box<dyn PostingList> = Box::new(a);
     let b: Box<dyn PostingList> = Box::new(b);
-    Merge(a.peekable(), b.peekable())
+    Merge(
+        PositionedPostingList(a, None),
+        PositionedPostingList(b, None),
+    )
 }
 
 pub fn exclude<A, B>(a: A, b: B) -> impl PostingList
@@ -50,19 +57,37 @@ where
 {
     let a: Box<dyn PostingList> = Box::new(a);
     let b: Box<dyn PostingList> = Box::new(b);
-    Exclude(a.peekable(), b.peekable())
+    Exclude(
+        PositionedPostingList(a, None),
+        PositionedPostingList(b, None),
+    )
 }
 
-pub struct Merge(
-    Peekable<Box<dyn PostingList>>,
-    Peekable<Box<dyn PostingList>>,
-);
+pub struct Merge(PositionedPostingList, PositionedPostingList);
 
-impl Iterator for Merge {
-    type Item = u64;
+struct PositionedPostingList(Box<dyn PostingList>, Option<u64>);
 
+impl PositionedPostingList {
     fn next(&mut self) -> Option<u64> {
-        match (self.0.peek().cloned(), self.1.peek().cloned()) {
+        if self.1.is_some() {
+            self.1.take()
+        } else {
+            self.1 = self.0.next();
+            self.1
+        }
+    }
+
+    fn current(&mut self) -> Option<u64> {
+        if self.1.is_none() {
+            self.1 = self.next();
+        }
+        self.1
+    }
+}
+
+impl PostingList for Merge {
+    fn next(&mut self) -> Option<u64> {
+        match (self.0.current(), self.1.current()) {
             (Some(a), Some(b)) => match a.cmp(&b) {
                 Ordering::Equal => {
                     self.0.next();
@@ -91,24 +116,18 @@ impl Iterator for Merge {
     }
 }
 
-pub struct Intersect(
-    Peekable<Box<dyn PostingList>>,
-    Peekable<Box<dyn PostingList>>,
-);
+pub struct Intersect(PositionedPostingList, PositionedPostingList);
 
-impl Iterator for Intersect {
-    type Item = u64;
-
+impl PostingList for Intersect {
     fn next(&mut self) -> Option<u64> {
-        while let (Some(a), Some(b)) = (self.0.peek(), self.1.peek()) {
-            match a.cmp(b) {
+        while let (Some(a), Some(b)) = (self.0.current(), self.1.current()) {
+            match a.cmp(&b) {
                 Ordering::Less => self.0.next(),
                 Ordering::Greater => self.1.next(),
                 Ordering::Equal => {
-                    let value = *a;
                     self.0.next();
                     self.1.next();
-                    return Some(value);
+                    return Some(a);
                 }
             };
         }
@@ -116,22 +135,16 @@ impl Iterator for Intersect {
     }
 }
 
-pub struct Exclude(
-    Peekable<Box<dyn PostingList>>,
-    Peekable<Box<dyn PostingList>>,
-);
+pub struct Exclude(PositionedPostingList, PositionedPostingList);
 
-impl Iterator for Exclude {
-    type Item = u64;
-
+impl PostingList for Exclude {
     fn next(&mut self) -> Option<u64> {
-        while let Some(a) = self.0.peek() {
-            if let Some(b) = self.1.peek() {
-                match a.cmp(b) {
+        while let Some(a) = self.0.current() {
+            if let Some(b) = self.1.current() {
+                match a.cmp(&b) {
                     Ordering::Less => {
-                        let value = *a;
                         self.0.next();
-                        return Some(value);
+                        return Some(a);
                     }
                     Ordering::Greater => {
                         self.1.next();
@@ -158,9 +171,7 @@ impl RangePostingList {
     }
 }
 
-impl Iterator for RangePostingList {
-    type Item = u64;
-
+impl PostingList for RangePostingList {
     fn next(&mut self) -> Option<u64> {
         self.0.next()
     }
