@@ -89,7 +89,7 @@ pub fn posting_list_merge(c: &mut Criterion) {
 }
 
 fn traverse(mut input: impl PostingList) {
-    while let Some(_) = input.next() {}
+    while let Some(_) = input.next().unwrap() {}
 }
 
 criterion_group!(
