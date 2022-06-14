@@ -1,3 +1,4 @@
+use prelude::*;
 use std::{cmp::Ordering, iter::Peekable, ops::Range};
 
 pub mod encoding;
@@ -7,10 +8,21 @@ pub mod prelude {
     pub type IoResult<T> = std::io::Result<T>;
 }
 
-pub trait PostingList: Iterator<Item = u64> {}
+pub trait PostingList: Iterator<Item = u64> {
+    fn to_vec(mut self) -> Result<Vec<u64>>
+    where
+        Self: Sized,
+    {
+        let mut result = vec![];
+        while let Some(item) = self.next() {
+            result.push(item)
+        }
+        Ok(result)
+    }
+}
 impl<T: Iterator<Item = u64>> PostingList for T {}
 
-pub fn intersect<A, B>(a: A, b: B) -> Intersect
+pub fn intersect<A, B>(a: A, b: B) -> impl PostingList
 where
     A: PostingList + 'static,
     B: PostingList + 'static,
@@ -21,7 +33,7 @@ where
     Intersect(a.peekable(), b.peekable())
 }
 
-pub fn merge<A, B>(a: A, b: B) -> Merge
+pub fn merge<A, B>(a: A, b: B) -> impl PostingList
 where
     A: PostingList + 'static,
     B: PostingList + 'static,
@@ -31,7 +43,7 @@ where
     Merge(a.peekable(), b.peekable())
 }
 
-pub fn exclude<A, B>(a: A, b: B) -> Exclude
+pub fn exclude<A, B>(a: A, b: B) -> impl PostingList
 where
     A: PostingList + 'static,
     B: PostingList + 'static,
@@ -159,32 +171,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_intersect() {
+    fn check_intersect() -> Result<()> {
         let a = RangePostingList(0..5);
         let b = RangePostingList(2..7);
 
-        let i = intersect(a, b);
-        let values = i.collect::<Vec<_>>();
+        let values = intersect(a, b).to_vec()?;
         assert_eq!(values, vec![2, 3, 4]);
+        Ok(())
     }
 
     #[test]
-    fn check_merge() {
+    fn check_merge() -> Result<()> {
         let a = RangePostingList(0..3);
         let b = RangePostingList(2..5);
 
-        let i = merge(a, b);
-        let values = i.collect::<Vec<_>>();
+        let values = merge(a, b).to_vec()?;
         assert_eq!(values, vec![0, 1, 2, 3, 4]);
+        Ok(())
     }
 
     #[test]
-    fn check_exclude() {
+    fn check_exclude() -> Result<()> {
         let a = RangePostingList(0..6);
         let b = RangePostingList(2..4);
 
-        let i = exclude(a, b);
-        let values = i.collect::<Vec<_>>();
+        let values = exclude(a, b).to_vec()?;
         assert_eq!(values, vec![0, 1, 4, 5]);
+        Ok(())
     }
 }
