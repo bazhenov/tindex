@@ -23,7 +23,7 @@ impl Encoder for PlainTextEncoder {
     }
 }
 
-pub struct PlainTextDecoder(BufReader<File>);
+pub struct PlainTextDecoder(pub BufReader<File>);
 
 impl PlainTextDecoder {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
