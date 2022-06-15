@@ -9,8 +9,21 @@ pub mod encoding;
 pub mod query;
 
 pub mod prelude {
+    use std::path::PathBuf;
+
+    use thiserror::Error;
+
     pub type Result<T> = anyhow::Result<T>;
     pub type IoResult<T> = std::io::Result<T>;
+
+    #[derive(Error, Debug)]
+    pub enum Error {
+        #[error("Unable to open posting list file: {0}")]
+        UnableToOpenPostingListFile(PathBuf),
+
+        #[error("Invalid index query: '{0}'")]
+        InvalidQuery(String)
+    }
 }
 
 pub trait PostingList {
