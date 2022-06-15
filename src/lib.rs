@@ -2,27 +2,57 @@ extern crate pest;
 #[macro_use]
 extern crate pest_derive;
 
+use encoding::PlainTextDecoder;
 use prelude::*;
-use std::{cmp::Ordering, ops::Range};
+use std::{
+    cmp::Ordering,
+    fs::File,
+    io::BufReader,
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 pub mod encoding;
 pub mod query;
 
 pub mod prelude {
     use std::path::PathBuf;
-
     use thiserror::Error;
 
     pub type Result<T> = anyhow::Result<T>;
     pub type IoResult<T> = std::io::Result<T>;
 
+    pub use anyhow::Context;
+    pub use Error::*;
+
     #[derive(Error, Debug)]
     pub enum Error {
-        #[error("Unable to open posting list file: {0}")]
-        UnableToOpenPostingListFile(PathBuf),
+        #[error("Opening index file: {0}")]
+        OpeningIndexFile(PathBuf),
 
-        #[error("Invalid index query: '{0}'")]
-        InvalidQuery(String)
+        #[error("Parsing query: '{0}'")]
+        ParsingQuery(String),
+    }
+}
+
+pub trait Index {
+    fn lookup(&mut self, name: &str) -> Result<Box<dyn PostingList>>;
+}
+
+pub struct DirectoryIndex(PathBuf);
+
+impl<T: AsRef<Path>> From<T> for DirectoryIndex {
+    fn from(input: T) -> Self {
+        Self(input.as_ref().to_path_buf())
+    }
+}
+
+impl Index for DirectoryIndex {
+    fn lookup(&mut self, name: &str) -> Result<Box<dyn PostingList>> {
+        let path = self.0.join(format!("{}.idx", name));
+        let file = File::open(&path).context(OpeningIndexFile(path))?;
+
+        Ok(Box::new(PlainTextDecoder(BufReader::new(file))))
     }
 }
 
@@ -81,8 +111,6 @@ where
     )
 }
 
-pub struct Merge(PositionedPostingList, PositionedPostingList);
-
 struct PositionedPostingList(Box<dyn PostingList>, Option<u64>);
 
 impl PositionedPostingList {
@@ -100,6 +128,17 @@ impl PositionedPostingList {
             self.1 = self.next()?;
         }
         Ok(self.1)
+    }
+}
+
+pub struct Merge(PositionedPostingList, PositionedPostingList);
+
+impl Merge {
+    pub fn new(a: Box<dyn PostingList>, b: Box<dyn PostingList>) -> Self {
+        Self(
+            PositionedPostingList(a, None),
+            PositionedPostingList(b, None),
+        )
     }
 }
 
@@ -136,6 +175,15 @@ impl PostingList for Merge {
 
 pub struct Intersect(PositionedPostingList, PositionedPostingList);
 
+impl Intersect {
+    pub fn new(a: Box<dyn PostingList>, b: Box<dyn PostingList>) -> Self {
+        Self(
+            PositionedPostingList(a, None),
+            PositionedPostingList(b, None),
+        )
+    }
+}
+
 impl PostingList for Intersect {
     fn next(&mut self) -> Result<Option<u64>> {
         while let (Some(a), Some(b)) = (self.0.current()?, self.1.current()?) {
@@ -154,6 +202,15 @@ impl PostingList for Intersect {
 }
 
 pub struct Exclude(PositionedPostingList, PositionedPostingList);
+
+impl Exclude {
+    pub fn new(a: Box<dyn PostingList>, b: Box<dyn PostingList>) -> Self {
+        Self(
+            PositionedPostingList(a, None),
+            PositionedPostingList(b, None),
+        )
+    }
+}
 
 impl PostingList for Exclude {
     fn next(&mut self) -> Result<Option<u64>> {
