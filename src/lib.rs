@@ -13,7 +13,9 @@ use std::{
 };
 
 pub mod encoding;
+pub mod indexer;
 pub mod query;
+pub mod serve;
 
 pub mod prelude {
     use std::path::PathBuf;
