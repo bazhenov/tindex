@@ -39,11 +39,17 @@ pub mod prelude {
     }
 }
 
-pub trait Index: Send {
+pub trait Index: Send + Sync {
     fn lookup(&self, name: &str) -> Result<Box<dyn PostingList>>;
 }
 
 pub struct DirectoryIndex(PathBuf);
+
+impl AsRef<DirectoryIndex> for &DirectoryIndex {
+    fn as_ref(&self) -> &DirectoryIndex {
+        self
+    }
+}
 
 impl<T: AsRef<Path>> From<T> for DirectoryIndex {
     fn from(input: T) -> Self {

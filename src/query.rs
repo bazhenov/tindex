@@ -20,13 +20,13 @@ enum Ast {
 /// Выполняет парсинг запроса
 ///
 /// Возвращает [PostingList] готовый к итерации. Индивидуальные термы по имени ищутся в переданном экземпляре [Index].
-pub fn parse_query(query: &str, index: impl AsRef<dyn Index>) -> Result<Box<dyn PostingList>> {
+pub fn parse_query<I: Index>(query: &str, index: impl AsRef<I>) -> Result<Box<dyn PostingList>> {
     let tokens = QueryParser::parse(Rule::root, query)?;
     let ast = parse_ast(tokens)?;
     visit(ast, &index)
 }
 
-fn visit(node: Ast, index: &impl AsRef<dyn Index>) -> Result<Box<dyn PostingList>> {
+fn visit<I: Index>(node: Ast, index: &impl AsRef<I>) -> Result<Box<dyn PostingList>> {
     let result: Box<dyn PostingList> = match node {
         Ast::Ident(name) => index.as_ref().lookup(&name)?,
         Ast::Exclude(lv, rv) => Box::new(Exclude::new(visit(*lv, index)?, visit(*rv, index)?)),
