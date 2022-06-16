@@ -1,25 +1,23 @@
 [package]
+edition = "2021"
 name = "auditorium"
 version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1.0"
-tempfile = "3.3"
-thiserror = "1.0"
-sqlx = { version = "0.5", features = [ "runtime-tokio-native-tls" , "mysql" ] }
-tokio = { version = "1", features = ["full"] }
+clap = {version = "3.2", features = ["derive"]}
 dotenv = "0.15"
 futures = "0.3"
 pest = "2.1"
 pest_derive = "2.1"
-clap = { version = "3.2", features = ["derive"] }
+sqlx = {version = "0.5", features = ["runtime-tokio-native-tls", "mysql"]}
+tempfile = "3.3"
+thiserror = "1.0"
+tokio = {version = "1", features = ["full"]}
 
 [dev-dependencies]
 criterion = "0.3"
 
 [[bench]]
-name = "intersect"
 harness = false
+name = "intersect"
