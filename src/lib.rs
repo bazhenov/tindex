@@ -1,6 +1,8 @@
 extern crate pest;
 #[macro_use]
 extern crate pest_derive;
+#[macro_use]
+extern crate rocket;
 
 use encoding::PlainTextDecoder;
 use prelude::*;
@@ -37,8 +39,8 @@ pub mod prelude {
     }
 }
 
-pub trait Index {
-    fn lookup(&mut self, name: &str) -> Result<Box<dyn PostingList>>;
+pub trait Index: Send {
+    fn lookup(&self, name: &str) -> Result<Box<dyn PostingList>>;
 }
 
 pub struct DirectoryIndex(PathBuf);
@@ -50,7 +52,7 @@ impl<T: AsRef<Path>> From<T> for DirectoryIndex {
 }
 
 impl Index for DirectoryIndex {
-    fn lookup(&mut self, name: &str) -> Result<Box<dyn PostingList>> {
+    fn lookup(&self, name: &str) -> Result<Box<dyn PostingList>> {
         let path = self.0.join(format!("{}.idx", name));
         let file = File::open(&path).context(OpeningIndexFile(path))?;
 
