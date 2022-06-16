@@ -40,7 +40,9 @@ pub mod prelude {
 }
 
 pub trait Index: Send + Sync {
-    fn lookup(&self, name: &str) -> Result<Box<dyn PostingList>>;
+    type Iterator: PostingList + 'static;
+
+    fn lookup(&self, name: &str) -> Result<Self::Iterator>;
 }
 
 pub struct DirectoryIndex(PathBuf);
@@ -58,11 +60,12 @@ impl<T: AsRef<Path>> From<T> for DirectoryIndex {
 }
 
 impl Index for DirectoryIndex {
-    fn lookup(&self, name: &str) -> Result<Box<dyn PostingList>> {
+    type Iterator = PlainTextDecoder;
+    fn lookup(&self, name: &str) -> Result<Self::Iterator> {
         let path = self.0.join(format!("{}.idx", name));
         let file = File::open(&path).context(OpeningIndexFile(path))?;
 
-        Ok(Box::new(PlainTextDecoder(BufReader::new(file))))
+        Ok(PlainTextDecoder(BufReader::new(file)))
     }
 }
 

@@ -28,7 +28,7 @@ pub fn parse_query<I: Index>(query: &str, index: impl AsRef<I>) -> Result<Box<dy
 
 fn visit<I: Index>(node: Ast, index: &impl AsRef<I>) -> Result<Box<dyn PostingList>> {
     let result: Box<dyn PostingList> = match node {
-        Ast::Ident(name) => index.as_ref().lookup(&name)?,
+        Ast::Ident(name) => Box::new(index.as_ref().lookup(&name)?),
         Ast::Exclude(lv, rv) => Box::new(Exclude::new(visit(*lv, index)?, visit(*rv, index)?)),
         Ast::Merge(lv, rv) => Box::new(Merge::new(visit(*lv, index)?, visit(*rv, index)?)),
         Ast::Intersect(lv, rv) => Box::new(Intersect::new(visit(*lv, index)?, visit(*rv, index)?)),
