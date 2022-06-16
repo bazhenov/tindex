@@ -29,7 +29,8 @@ pub async fn main(opts: ServeOpts) -> Result<()> {
 
 #[get("/?<query>")]
 fn index(query: &str, index: &State<app::Index>) -> HttpResult<String> {
-    let mut list = parse_query(query, index.deref()).map_err(|_| Status::BadRequest)?;
+    let index = index.deref();
+    let mut list = parse_query(query, index).map_err(|_| Status::BadRequest)?;
     let mut result = String::new();
     while let Some(id) = list.next().map_err(|_| Status::InternalServerError)? {
         result.push_str(&format!("{}\n", id));
