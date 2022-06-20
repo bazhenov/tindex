@@ -7,7 +7,6 @@ extern crate rocket;
 use encoding::PlainTextDecoder;
 use prelude::*;
 use std::{
-    cmp::Ordering,
     fs::File,
     io::BufReader,
     ops::Range,
@@ -167,32 +166,26 @@ impl Merge {
 
 impl PostingList for Merge {
     fn next(&mut self) -> Result<Option<u64>> {
-        match (self.0.current()?, self.1.current()?) {
-            (Some(a), Some(b)) => match a.cmp(&b) {
-                Ordering::Equal => {
-                    self.0.next()?;
-                    self.1.next()?;
-                    Ok(Some(a))
-                }
-                Ordering::Less => {
-                    self.0.next()?;
-                    Ok(Some(a))
-                }
-                Ordering::Greater => {
-                    self.1.next()?;
-                    Ok(Some(b))
-                }
-            },
-            (Some(a), None) => {
+        let a = self.0.current()?;
+        let b = self.1.current()?;
+        if let Some((a, b)) = a.zip(b) {
+            if a <= b {
                 self.0.next()?;
-                Ok(Some(a))
             }
-            (None, Some(b)) => {
+            if b <= a {
                 self.1.next()?;
-                Ok(Some(b))
             }
-            (None, None) => Ok(None),
+            return Ok(Some(a.min(b)));
         }
+        if let Some(a) = self.0.current()? {
+            self.0.next()?;
+            return Ok(Some(a));
+        }
+        if let Some(b) = self.1.current()? {
+            self.1.next()?;
+            return Ok(Some(b));
+        }
+        Ok(None)
     }
 }
 
@@ -224,7 +217,7 @@ impl PostingList for Intersect {
                 }
             }
         }
-        return Ok(None);
+        Ok(None)
     }
 }
 
