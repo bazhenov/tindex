@@ -133,7 +133,7 @@ impl PositionedPostingList {
     }
 
     fn advance(&mut self, target: u64) -> Result<Option<u64>> {
-        if let Some(c) = self.current()? {
+        if let Some(c) = self.1 {
             if c >= target {
                 return Ok(Some(c));
             }
@@ -143,7 +143,7 @@ impl PositionedPostingList {
                 break;
             }
         }
-        self.current()
+        Ok(self.1)
     }
 
     fn current(&mut self) -> Result<Option<u64>> {
@@ -209,18 +209,22 @@ impl Intersect {
 
 impl PostingList for Intersect {
     fn next(&mut self) -> Result<Option<u64>> {
-        while let (Some(a), Some(b)) = (self.0.current()?, self.1.current()?) {
-            match a.cmp(&b) {
-                Ordering::Less => self.0.advance(b)?,
-                Ordering::Greater => self.1.advance(a)?,
-                Ordering::Equal => {
-                    self.0.next()?;
-                    self.1.next()?;
-                    return Ok(Some(a));
+        if let Some(mut target) = self.0.next()? {
+            loop {
+                match self.1.advance(target)? {
+                    Some(v) if v == target => return Ok(Some(target)),
+                    Some(v) => target = v,
+                    None => return Ok(None),
                 }
-            };
+
+                match self.0.advance(target)? {
+                    Some(v) if v == target => return Ok(Some(target)),
+                    Some(v) => target = v,
+                    None => return Ok(None),
+                }
+            }
         }
-        Ok(None)
+        return Ok(None);
     }
 }
 
