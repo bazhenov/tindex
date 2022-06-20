@@ -128,12 +128,22 @@ struct PositionedPostingList(Box<dyn PostingList>, Option<u64>);
 
 impl PositionedPostingList {
     fn next(&mut self) -> Result<Option<u64>> {
-        if self.1.is_some() {
-            Ok(self.1.take())
-        } else {
-            self.1 = self.0.next()?;
-            Ok(self.1)
+        self.1 = self.0.next()?;
+        Ok(self.1)
+    }
+
+    fn advance(&mut self, target: u64) -> Result<Option<u64>> {
+        if let Some(c) = self.current()? {
+            if c >= target {
+                return Ok(Some(c));
+            }
         }
+        while let Some(n) = self.next()? {
+            if n >= target {
+                break;
+            }
+        }
+        self.current()
     }
 
     fn current(&mut self) -> Result<Option<u64>> {
@@ -201,8 +211,8 @@ impl PostingList for Intersect {
     fn next(&mut self) -> Result<Option<u64>> {
         while let (Some(a), Some(b)) = (self.0.current()?, self.1.current()?) {
             match a.cmp(&b) {
-                Ordering::Less => self.0.next()?,
-                Ordering::Greater => self.1.next()?,
+                Ordering::Less => self.0.advance(b)?,
+                Ordering::Greater => self.1.advance(a)?,
                 Ordering::Equal => {
                     self.0.next()?;
                     self.1.next()?;
@@ -227,24 +237,11 @@ impl Exclude {
 
 impl PostingList for Exclude {
     fn next(&mut self) -> Result<Option<u64>> {
-        while let Some(a) = self.0.current()? {
-            if let Some(b) = self.1.current()? {
-                match a.cmp(&b) {
-                    Ordering::Less => {
-                        self.0.next()?;
-                        return Ok(Some(a));
-                    }
-                    Ordering::Greater => {
-                        self.1.next()?;
-                    }
-                    Ordering::Equal => {
-                        self.0.next()?;
-                        self.1.next()?;
-                    }
-                };
-            } else {
-                return self.0.next();
+        while let Some(a) = self.0.next()? {
+            if self.1.advance(a)? == Some(a) {
+                continue;
             }
+            return Ok(Some(a));
         }
         Ok(None)
     }
