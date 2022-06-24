@@ -4,7 +4,7 @@ use rocket::{http::Status, State};
 use std::{ops::Deref, path::PathBuf};
 
 #[derive(Parser, Debug)]
-pub struct ServeOpts {
+pub struct Opts {
     path: PathBuf,
 }
 
@@ -16,7 +16,7 @@ mod app {
     pub type Index = DirectoryIndex;
 }
 
-pub async fn main(opts: ServeOpts) -> Result<()> {
+pub async fn main(opts: Opts) -> Result<()> {
     let index = DirectoryIndex(opts.path);
 
     let _ = rocket::build()

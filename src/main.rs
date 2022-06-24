@@ -1,8 +1,4 @@
-use auditorium::{
-    indexer,
-    prelude::*,
-    serve::{self, ServeOpts},
-};
+use auditorium::{indexer, prelude::*, serve};
 use clap::Parser;
 use dotenv::dotenv;
 
@@ -15,8 +11,8 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Subcommand {
-    Serve(ServeOpts),
-    Index,
+    Serve(serve::Opts),
+    Index(indexer::Opts),
 }
 
 #[tokio::main]
@@ -24,7 +20,7 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     match Args::parse().action {
-        Subcommand::Index => indexer::main().await?,
+        Subcommand::Index(opts) => indexer::main(opts).await?,
         Subcommand::Serve(opts) => serve::main(opts).await?,
     }
     Ok(())
