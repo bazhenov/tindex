@@ -1,8 +1,6 @@
 extern crate pest;
 #[macro_use]
 extern crate pest_derive;
-#[macro_use]
-extern crate rocket;
 
 use encoding::PlainTextDecoder;
 use prelude::*;
@@ -27,6 +25,8 @@ pub mod prelude {
 
     pub use anyhow::Context;
     pub use Error::*;
+
+    pub use log::{trace, debug, info, warn, error, log};
 
     #[derive(Error, Debug)]
     pub enum Error {

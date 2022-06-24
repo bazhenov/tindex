@@ -16,7 +16,7 @@ type U64Stream<'a> = Pin<Box<dyn Stream<Item = Result<u64>> + 'a>>;
 
 pub async fn main(opts: Opts) -> Result<()> {
     let url = env::var("DB_URL")?;
-    println!("Connecting...");
+    info!("Connecting...");
     let mut db = MySqlSource::new(&url).await?;
 
     let queries = vec![Query {
@@ -25,7 +25,7 @@ pub async fn main(opts: Opts) -> Result<()> {
     }];
 
     for q in queries {
-        println!("Querying {}...", q.name);
+        info!("Querying {}...", q.name);
 
         let path = opts.path.join(q.name).with_extension("idx");
         let file = File::create(path)?;

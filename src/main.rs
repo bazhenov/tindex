@@ -1,6 +1,7 @@
 use auditorium::{indexer, prelude::*, serve};
 use clap::Parser;
 use dotenv::dotenv;
+extern crate rocket;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -18,6 +19,7 @@ enum Subcommand {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
+    env_logger::init();
 
     match Args::parse().action {
         Subcommand::Index(opts) => indexer::main(opts).await?,

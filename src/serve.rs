@@ -1,6 +1,6 @@
 use crate::{prelude::*, query::parse_query, DirectoryIndex};
 use clap::Parser;
-use rocket::{http::Status, State};
+use rocket::{get, http::Status, routes, State};
 use std::{ops::Deref, path::PathBuf};
 
 #[derive(Parser, Debug)]
