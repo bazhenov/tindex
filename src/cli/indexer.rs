@@ -5,7 +5,7 @@ use auditorium::{
 };
 use chrono::Utc;
 use clap::Parser;
-use futures::{Stream, StreamExt};
+use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use std::{env, fs::File, path::PathBuf, pin::Pin, sync::Arc};
 use tokio::time::{sleep_until, Instant};
 
@@ -35,7 +35,8 @@ pub async fn main(opts: Opts) -> Result<()> {
             handles.push(tokio::spawn(query_worker(db, q, path)));
         }
 
-        for h in handles {
+        let futures = handles.into_iter().collect::<FuturesUnordered<_>>();
+        for h in futures {
             h.await??;
         }
     }
