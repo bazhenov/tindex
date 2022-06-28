@@ -2,20 +2,20 @@
 use serde::Deserialize;
 
 #[derive(Deserialize, PartialEq, Eq, Debug)]
-struct Config {
-    mysql: Vec<MySqlServer>,
+pub struct Config {
+    pub mysql: Vec<MySqlServer>,
 }
 
 #[derive(Deserialize, PartialEq, Eq, Debug)]
-struct MySqlServer {
-    name: String,
-    queries: Vec<MySqlQuery>,
+pub struct MySqlServer {
+    pub name: String,
+    pub queries: Vec<MySqlQuery>,
 }
 
 #[derive(Deserialize, PartialEq, Eq, Debug)]
-struct MySqlQuery {
-    name: String,
-    sql: String,
+pub struct MySqlQuery {
+    pub name: String,
+    pub sql: String,
 }
 
 #[cfg(test)]

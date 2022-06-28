@@ -32,6 +32,9 @@ pub mod prelude {
         #[error("Opening index file: {0}")]
         OpeningIndexFile(PathBuf),
 
+        #[error("Reading config file: {0}")]
+        ReadingConfigFile(PathBuf),
+
         #[error("Parsing query: '{0}'")]
         ParsingQuery(String),
     }
