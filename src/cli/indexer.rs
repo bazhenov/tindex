@@ -1,5 +1,5 @@
 use auditorium::{
-    config::Config,
+    config::{Config, MySqlServer},
     encoding::{Encoder, PlainTextEncoder},
     prelude::*,
 };
@@ -18,12 +18,11 @@ pub struct Opts {
 type U64Stream<'a> = Pin<Box<dyn Stream<Item = Result<u64>> + 'a>>;
 
 pub async fn main(opts: Opts) -> Result<()> {
-    let config = read_config(&opts.config).context(ReadingConfigFile(opts.config))?;
+    let config = read_config(&opts.config).context(ReadingConfigFile(opts.config.clone()))?;
     for mysql in config.mysql {
-        info!("Connecting mysql source {}...", mysql.name);
-        let var_name = format!("{}_MYSQL_URL", mysql.name.to_uppercase());
-        let url = env::var(var_name)?;
-        let mut db = MySqlSource::new(&url).await?;
+        let db = connect_mysql(&mysql)
+            .await
+            .context(ConnectingSource(mysql.name.clone()))?;
 
         for q in mysql.queries {
             info!("Querying {}...", q.name);
@@ -38,6 +37,13 @@ pub async fn main(opts: Opts) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn connect_mysql(mysql: &MySqlServer) -> Result<MySqlSource> {
+    trace!("Connecting mysql source {}...", mysql.name);
+    let var_name = format!("{}_MYSQL_URL", mysql.name.to_uppercase());
+    let url = env::var(var_name)?;
+    Ok(MySqlSource::new(&url).await?)
 }
 
 fn read_config(path: &PathBuf) -> Result<Config> {
@@ -66,7 +72,7 @@ fn write(rows: impl IntoIterator<Item = u64>, mut sink: impl Encoder) -> Result<
 trait Source<'a> {
     type RecordIterator: Stream<Item = Result<u64>>;
 
-    fn execute(&'a mut self, query: &'a str) -> Result<Self::RecordIterator>;
+    fn execute(&'a self, query: &'a str) -> Result<Self::RecordIterator>;
 }
 
 /// Код позволяющий системе читать данные из MySQL
@@ -86,7 +92,7 @@ mod mysql {
     impl<'a> Source<'a> for MySqlSource {
         type RecordIterator = U64Stream<'a>;
 
-        fn execute(&'a mut self, query: &'a str) -> Result<Self::RecordIterator> {
+        fn execute(&'a self, query: &'a str) -> Result<Self::RecordIterator> {
             let rows = sqlx::query(query).fetch(&self.0);
             Ok(Box::pin(rows.map(read_record)))
         }

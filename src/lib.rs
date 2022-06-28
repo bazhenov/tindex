@@ -35,6 +35,9 @@ pub mod prelude {
         #[error("Reading config file: {0}")]
         ReadingConfigFile(PathBuf),
 
+        #[error("Connecting source: {0}")]
+        ConnectingSource(String),
+
         #[error("Parsing query: '{0}'")]
         ParsingQuery(String),
     }
