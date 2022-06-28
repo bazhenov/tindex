@@ -4,7 +4,7 @@ ALPHA = { 'a'..'z' | 'A'..'Z' }
 DIGIT = { '0'..'9' }
 OP = { "&" | "|" | "-" }
 
-ident = @{ ALPHA ~ (ALPHA | DIGIT)* }
+ident = @{ ALPHA ~ (ALPHA | DIGIT | "_" | "-")* }
 
 intersect = { ident ~ "&" ~ ident }
 merge = { ident ~ "|" ~ ident }
