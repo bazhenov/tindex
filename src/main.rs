@@ -1,4 +1,7 @@
-use auditorium::{indexer, prelude::*, serve};
+mod cli;
+
+pub use auditorium::prelude;
+use auditorium::prelude::*;
 use clap::Parser;
 use dotenv::dotenv;
 extern crate rocket;
@@ -12,8 +15,9 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Subcommand {
-    Serve(serve::Opts),
-    Index(indexer::Opts),
+    Serve(cli::serve::Opts),
+    Index(cli::indexer::Opts),
+    Query(cli::query::Opts),
 }
 
 #[tokio::main]
@@ -22,8 +26,9 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     match Args::parse().action {
-        Subcommand::Index(opts) => indexer::main(opts).await?,
-        Subcommand::Serve(opts) => serve::main(opts).await?,
+        Subcommand::Index(opts) => cli::indexer::main(opts).await?,
+        Subcommand::Serve(opts) => cli::serve::main(opts).await?,
+        Subcommand::Query(opts) => cli::query::main(opts).await?,
     }
     Ok(())
 }

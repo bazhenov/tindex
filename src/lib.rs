@@ -12,9 +12,7 @@ use std::{
 };
 
 pub mod encoding;
-pub mod indexer;
 pub mod query;
-pub mod serve;
 
 pub mod prelude {
     use std::path::PathBuf;
@@ -26,7 +24,7 @@ pub mod prelude {
     pub use anyhow::Context;
     pub use Error::*;
 
-    pub use log::{trace, debug, info, warn, error, log};
+    pub use log::{debug, error, info, log, trace, warn};
 
     #[derive(Error, Debug)]
     pub enum Error {
@@ -44,7 +42,7 @@ pub trait Index: Send + Sync {
     fn lookup(&self, name: &str) -> Result<Self::Iterator>;
 }
 
-pub struct DirectoryIndex(PathBuf);
+pub struct DirectoryIndex(pub PathBuf);
 
 impl AsRef<DirectoryIndex> for &DirectoryIndex {
     fn as_ref(&self) -> &DirectoryIndex {

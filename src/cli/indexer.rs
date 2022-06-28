@@ -1,10 +1,10 @@
-use crate::{
+use auditorium::{
     encoding::{Encoder, PlainTextEncoder},
-    indexer::mysql::MySqlSource,
     prelude::*,
 };
 use clap::Parser;
 use futures::{Stream, StreamExt};
+use mysql::MySqlSource;
 use std::{env, fs::File, path::PathBuf, pin::Pin};
 
 #[derive(Parser, Debug)]
@@ -19,10 +19,18 @@ pub async fn main(opts: Opts) -> Result<()> {
     info!("Connecting...");
     let mut db = MySqlSource::new(&url).await?;
 
-    let queries = vec![Query {
-        name: "sss".to_string(),
-        query: "select id from register_user where adddate > NOW() - INTERVAL 1 DAY".to_string(),
-    }];
+    let queries = vec![
+        Query {
+            name: "new_users_1_day".to_string(),
+            query: "select id from register_user where adddate > NOW() - INTERVAL 1 DAY"
+                .to_string(),
+        },
+        Query {
+            name: "bulletin_owners_1_day".to_string(),
+            query: "select DISTINCT reg_user_id from bulletins where date_created > NOW() - INTERVAL 1 DAY"
+                .to_string(),
+        },
+    ];
 
     for q in queries {
         info!("Querying {}...", q.name);

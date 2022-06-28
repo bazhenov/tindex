@@ -1,4 +1,4 @@
-use crate::{prelude::*, query::parse_query, DirectoryIndex};
+use auditorium::{prelude::*, query::parse_query, DirectoryIndex};
 use clap::Parser;
 use rocket::{get, http::Status, routes, State};
 use std::{ops::Deref, path::PathBuf};
@@ -11,7 +11,7 @@ pub struct Opts {
 type HttpResult<T> = std::result::Result<T, Status>;
 
 mod app {
-    use crate::DirectoryIndex;
+    use super::DirectoryIndex;
 
     pub type Index = DirectoryIndex;
 }
