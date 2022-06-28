@@ -9,6 +9,7 @@ pub struct Config {
 #[derive(Deserialize, PartialEq, Eq, Debug)]
 pub struct MySqlServer {
     pub name: String,
+    pub max_connections: Option<u32>,
     pub queries: Vec<MySqlQuery>,
 }
 
@@ -29,6 +30,7 @@ mod tests {
             r#"
             mysql:
                 - name: slave
+                  max_connections: 3
                   queries:
                     - name: bulletin_1_week
                       sql: SELECT 1
@@ -42,6 +44,7 @@ mod tests {
             mysql: vec![
                 MySqlServer {
                     name: "slave".to_string(),
+                    max_connections: Some(3),
                     queries: vec![MySqlQuery {
                         name: "bulletin_1_week".to_string(),
                         sql: "SELECT 1".to_string(),
@@ -49,6 +52,7 @@ mod tests {
                 },
                 MySqlServer {
                     name: "users".to_string(),
+                    max_connections: None,
                     queries: vec![MySqlQuery {
                         name: "user_stat".to_string(),
                         sql: "SELECT 2".to_string(),
