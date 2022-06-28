@@ -4,7 +4,7 @@ use crate::{
     prelude::*,
 };
 use clap::Parser;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, StreamExt};
 use std::{env, fs::File, path::PathBuf, pin::Pin};
 
 #[derive(Parser, Debug)]
@@ -31,14 +31,25 @@ pub async fn main(opts: Opts) -> Result<()> {
         let file = File::create(path)?;
 
         let rows = db.execute(&q.query)?;
-        write(rows, PlainTextEncoder(file)).await?;
+        let rows = sort(rows).await?;
+        write(rows, PlainTextEncoder(file))?;
     }
 
     Ok(())
 }
 
-async fn write(mut rows: U64Stream<'_>, mut sink: impl Encoder) -> Result<()> {
-    while let Some(id) = rows.try_next().await? {
+async fn sort(rows: U64Stream<'_>) -> Result<Vec<u64>> {
+    let mut vec = rows
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
+    vec.sort();
+    Ok(vec)
+}
+
+fn write(rows: impl IntoIterator<Item = u64>, mut sink: impl Encoder) -> Result<()> {
+    for id in rows {
         sink.write(id)?;
     }
     Ok(())
