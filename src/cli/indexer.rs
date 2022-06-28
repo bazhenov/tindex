@@ -26,8 +26,18 @@ pub async fn main(opts: Opts) -> Result<()> {
                 .to_string(),
         },
         Query {
+            name: "new_users_1_week".to_string(),
+            query: "select id from register_user where adddate > NOW() - INTERVAL 1 WEEK"
+                .to_string(),
+        },
+        Query {
             name: "bulletin_owners_1_day".to_string(),
             query: "select DISTINCT reg_user_id from bulletins where date_created > NOW() - INTERVAL 1 DAY"
+                .to_string(),
+        },
+        Query {
+            name: "bulletin_owners_1_week".to_string(),
+            query: "select DISTINCT reg_user_id from bulletins where date_created > NOW() - INTERVAL 1 WEEK"
                 .to_string(),
         },
     ];

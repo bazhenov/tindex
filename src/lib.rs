@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub mod config;
 pub mod encoding;
 pub mod query;
 
