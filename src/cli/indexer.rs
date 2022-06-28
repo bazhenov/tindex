@@ -1,11 +1,15 @@
 use auditorium::{
-    config::{Config, MySqlServer},
+    config::{Config, MySqlQuery, MySqlServer},
     encoding::{Encoder, PlainTextEncoder},
     prelude::*,
 };
+use chrono::Utc;
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use std::{env, fs::File, path::PathBuf, pin::Pin, sync::Arc};
+use tokio::time::{sleep_until, Instant};
+
+use self::mysql::MySqlSource;
 
 #[derive(Parser, Debug)]
 pub struct Opts {
@@ -28,14 +32,7 @@ pub async fn main(opts: Opts) -> Result<()> {
         for q in mysql.queries {
             let path = opts.path.join(&q.name).with_extension("idx");
             let db = db.clone();
-            let handle = tokio::spawn(async move {
-                info!("Querying {}...", q.name);
-                let rows = db.execute(&q.sql)?;
-                let rows = sort(rows).await?;
-                let file = File::create(path)?;
-                write(rows, PlainTextEncoder(file))
-            });
-            handles.push(handle);
+            handles.push(tokio::spawn(query_worker(db, q, path)));
         }
 
         for h in handles {
@@ -44,6 +41,22 @@ pub async fn main(opts: Opts) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn query_worker(db: Arc<MySqlSource>, q: MySqlQuery, path: PathBuf) -> Result<()> {
+    loop {
+        info!("Querying {}...", &q.name);
+        let rows = db.execute(&q.sql)?;
+        let rows = sort(rows).await?;
+        let file = File::create(&path)?;
+        write(rows, PlainTextEncoder(file))?;
+
+        let next_execution = q.schedule.upcoming(Utc).take(1).next().unwrap();
+        let duration = next_execution - Utc::now();
+
+        info!("Next execution of {} on {}", &q.name, next_execution);
+        sleep_until(Instant::now() + duration.to_std()?).await;
+    }
 }
 
 fn read_config(path: &PathBuf) -> Result<Config> {
