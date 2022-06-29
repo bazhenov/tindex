@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     match Args::parse().action {
-        Subcommand::Index(opts) => cli::indexer::main(opts).await?,
+        Subcommand::Index(opts) => cli::indexer::main(opts)?,
         Subcommand::Serve(opts) => cli::serve::main(opts).await?,
         Subcommand::Query(opts) => cli::query::main(opts).await?,
     }

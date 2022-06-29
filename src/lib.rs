@@ -40,6 +40,9 @@ pub mod prelude {
 
         #[error("Parsing query: '{0}'")]
         ParsingQuery(String),
+
+        #[error("MySql ERROR: '{0}' in query {1}")]
+        MySqlError(mysql::Error, String),
     }
 }
 

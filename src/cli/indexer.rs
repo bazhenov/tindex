@@ -3,13 +3,13 @@ use auditorium::{
     encoding::{Encoder, PlainTextEncoder},
     prelude::*,
 };
-use chrono::Utc;
 use clap::Parser;
-use futures::{stream::FuturesUnordered, Stream, StreamExt};
-use std::{env, fs::File, path::PathBuf, pin::Pin, sync::Arc};
-use tokio::time::{sleep_until, Instant};
-
-use self::mysql::MySqlSource;
+use std::{
+    env,
+    fs::File,
+    path::PathBuf,
+    thread::{self},
+};
 
 #[derive(Parser, Debug)]
 pub struct Opts {
@@ -18,62 +18,47 @@ pub struct Opts {
     path: PathBuf,
 }
 
-type U64Stream<'a> = Pin<Box<dyn Stream<Item = Result<u64>> + Send + 'a>>;
-
-pub async fn main(opts: Opts) -> Result<()> {
+pub fn main(opts: Opts) -> Result<()> {
     let config = read_config(&opts.config).context(ReadingConfigFile(opts.config.clone()))?;
+
+    let mut handles = vec![];
     for mysql in config.mysql {
-        let db = mysql::connect(&mysql)
-            .await
-            .context(ConnectingSource(mysql.name.clone()))?;
-        let db = Arc::new(db);
+        let db = mysql::connect(&mysql).context(ConnectingSource(mysql.name.clone()))?;
 
-        let mut handles = vec![];
-        for q in mysql.queries {
-            let path = opts.path.join(&q.name).with_extension("idx");
-            let db = db.clone();
-            handles.push(tokio::spawn(query_worker(db, q, path)));
-        }
+        let path = opts.path.clone();
+        let name = mysql.name.clone();
+        let handle = thread::spawn(move || query_worker(name, db, mysql.queries, path));
+        handles.push(handle);
+    }
 
-        let futures = handles.into_iter().collect::<FuturesUnordered<_>>();
-        for h in futures {
-            h.await??;
-        }
+    for h in handles {
+        h.join().unwrap().context("Ooops")?;
     }
 
     Ok(())
 }
 
-async fn query_worker(db: Arc<MySqlSource>, q: MySqlQuery, path: PathBuf) -> Result<()> {
-    loop {
-        info!("Querying {}...", &q.name);
-        let rows = db.execute(&q.sql)?;
-        let rows = sort(rows).await?;
+fn query_worker<T: Source>(
+    name: String,
+    mut db: T,
+    queries: Vec<T::Query>,
+    path: PathBuf,
+) -> Result<()> {
+    for q in &queries {
+        let path = path.join(q.name()).with_extension("idx");
+        info!("Querying {} {}...", &name, q.name());
+        let mut ids = db.execute(q)?;
+        ids.sort_unstable();
         let file = File::create(&path)?;
-        write(rows, PlainTextEncoder(file))?;
-
-        let next_execution = q.schedule.upcoming(Utc).take(1).next().unwrap();
-        let duration = next_execution - Utc::now();
-
-        info!("Next execution of {} on {}", &q.name, next_execution);
-        sleep_until(Instant::now() + duration.to_std()?).await;
+        write(ids, PlainTextEncoder(file))?;
     }
+    Ok(())
 }
 
 fn read_config(path: &PathBuf) -> Result<Config> {
     let file = File::open(path)?;
     let config = serde_yaml::from_reader(file)?;
     Ok(config)
-}
-
-async fn sort(rows: U64Stream<'_>) -> Result<Vec<u64>> {
-    let mut vec = rows
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>>>()?;
-    vec.sort();
-    Ok(vec)
 }
 
 fn write(rows: impl IntoIterator<Item = u64>, mut sink: impl Encoder) -> Result<()> {
@@ -83,50 +68,42 @@ fn write(rows: impl IntoIterator<Item = u64>, mut sink: impl Encoder) -> Result<
     Ok(())
 }
 
-trait Source<'a> {
-    type RecordIterator: Stream<Item = Result<u64>>;
+trait NamedQuery {
+    fn name(&self) -> &str;
+}
 
-    fn execute<'s>(&'s self, query: &'a str) -> Result<Self::RecordIterator>
-    where
-        's: 'a;
+trait Source {
+    type Query: NamedQuery;
+
+    fn execute(&mut self, query: &Self::Query) -> Result<Vec<u64>>;
 }
 
 /// Код позволяющий системе читать данные из MySQL
 mod mysql {
     use super::*;
-    use futures::StreamExt;
-    use sqlx::{
-        mysql::{MySqlPoolOptions, MySqlRow},
-        MySql, Pool, Row,
-    };
+    use ::mysql::{prelude::Queryable, Conn, Opts};
 
-    pub async fn connect(mysql: &MySqlServer) -> Result<MySqlSource> {
+    pub fn connect(mysql: &MySqlServer) -> Result<MySqlSource> {
         trace!("Connecting mysql source {}...", mysql.name);
         let var_name = format!("{}_MYSQL_URL", mysql.name.to_uppercase());
         let url = env::var(var_name)?;
-        let pool = MySqlPoolOptions::new()
-            .max_connections(mysql.max_connections.unwrap_or(1))
-            .connect(&url)
-            .await?;
-        Ok(MySqlSource(pool))
+        let conn = Conn::new(Opts::from_url(&url)?)?;
+        Ok(MySqlSource(conn))
     }
 
-    pub struct MySqlSource(Pool<MySql>);
+    pub struct MySqlSource(Conn);
 
-    impl<'a> Source<'a> for MySqlSource {
-        type RecordIterator = U64Stream<'a>;
-
-        fn execute<'s>(&'s self, query: &'a str) -> Result<Self::RecordIterator>
-        where
-            's: 'a,
-        {
-            let rows = sqlx::query(query).fetch(&self.0);
-            Ok(Box::pin(rows.map(read_record)))
+    impl NamedQuery for MySqlQuery {
+        fn name(&self) -> &str {
+            &self.name
         }
     }
 
-    fn read_record(input: std::result::Result<MySqlRow, sqlx::Error>) -> Result<u64> {
-        let id = input?.try_get::<i32, _>(0)?;
-        Ok(u64::try_from(id)?)
+    impl Source for MySqlSource {
+        type Query = MySqlQuery;
+
+        fn execute(&mut self, query: &MySqlQuery) -> Result<Vec<u64>> {
+            Ok(self.0.exec_map(&query.sql, (), |id| id)?)
+        }
     }
 }
