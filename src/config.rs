@@ -12,7 +12,6 @@ pub struct Config {
 #[derive(Deserialize, PartialEq, Eq, Debug)]
 pub struct MySqlServer {
     pub name: String,
-    pub max_connections: Option<u32>,
     pub queries: Vec<MySqlQuery>,
 }
 
@@ -43,7 +42,6 @@ mod tests {
             r#"
             mysql:
                 - name: slave
-                  max_connections: 3
                   queries:
                     - name: bulletin_1_week
                       schedule: "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2"
@@ -59,7 +57,6 @@ mod tests {
             mysql: vec![
                 MySqlServer {
                     name: "slave".to_string(),
-                    max_connections: Some(3),
                     queries: vec![MySqlQuery {
                         name: "bulletin_1_week".to_string(),
                         schedule: Schedule::from_str("0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2")?,
@@ -68,7 +65,6 @@ mod tests {
                 },
                 MySqlServer {
                     name: "users".to_string(),
-                    max_connections: None,
                     queries: vec![MySqlQuery {
                         name: "user_stat".to_string(),
                         schedule: Schedule::from_str("0 0 * * * *")?,
