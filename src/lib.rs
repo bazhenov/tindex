@@ -4,12 +4,7 @@ extern crate pest_derive;
 
 use encoding::PlainTextDecoder;
 use prelude::*;
-use std::{
-    fs::File,
-    io::BufReader,
-    ops::Range,
-    path::{Path, PathBuf},
-};
+use std::{fs::File, io::BufReader, ops::Range, path::PathBuf};
 
 pub mod config;
 pub mod encoding;
@@ -40,9 +35,6 @@ pub mod prelude {
 
         #[error("Parsing query: '{0}'")]
         ParsingQuery(String),
-
-        #[error("MySql ERROR: '{0}' in query {1}")]
-        MySqlError(mysql::Error, String),
     }
 }
 
@@ -53,18 +45,6 @@ pub trait Index: Send + Sync {
 }
 
 pub struct DirectoryIndex(pub PathBuf);
-
-impl AsRef<DirectoryIndex> for &DirectoryIndex {
-    fn as_ref(&self) -> &DirectoryIndex {
-        self
-    }
-}
-
-impl<T: AsRef<Path>> From<T> for DirectoryIndex {
-    fn from(input: T) -> Self {
-        Self(input.as_ref().to_path_buf())
-    }
-}
 
 impl Index for DirectoryIndex {
     type Iterator = PlainTextDecoder;
