@@ -4,12 +4,7 @@ use auditorium::{
     prelude::*,
 };
 use clap::Parser;
-use std::{
-    env,
-    fs::File,
-    path::PathBuf,
-    thread::{self},
-};
+use std::{env, fs::File, path::PathBuf, thread};
 
 #[derive(Parser, Debug)]
 pub struct Opts {
@@ -19,31 +14,31 @@ pub struct Opts {
 }
 
 pub fn main(opts: Opts) -> Result<()> {
-    let config = read_config(&opts.config).context(ReadingConfigFile(opts.config.clone()))?;
+    let config = read_config(&opts.config).context(ReadingConfig(opts.config))?;
 
     let mut handles = vec![];
     for mysql in config.mysql {
         let db = mysql::connect(&mysql).context(ConnectingSource(mysql.name.clone()))?;
 
         let path = opts.path.clone();
-        let name = mysql.name.clone();
-        let handle = thread::spawn(move || query_worker(name, db, mysql.queries, path));
+        let handle = thread::spawn(move || query_worker(mysql.name, db, mysql.queries, path));
         handles.push(handle);
     }
 
     for h in handles {
-        h.join().unwrap().context("Ooops")?;
+        h.join()
+            .map_err(|_| QueryWorkerPanic)?
+            .context(QueryWorkerFailed)?;
     }
 
     Ok(())
 }
 
-fn query_worker<T: Source>(
-    name: String,
-    mut db: T,
-    queries: Vec<T::Query>,
-    path: PathBuf,
-) -> Result<()> {
+fn query_worker<DB>(name: String, mut db: DB, queries: Vec<DB::Query>, path: PathBuf) -> Result<()>
+where
+    DB: Database,
+    DB::Query: NamedQuery,
+{
     for q in &queries {
         let path = path.join(q.name()).with_extension("idx");
         info!("Querying {} {}...", &name, q.name());
@@ -72,8 +67,8 @@ trait NamedQuery {
     fn name(&self) -> &str;
 }
 
-trait Source {
-    type Query: NamedQuery;
+trait Database {
+    type Query;
 
     fn execute(&mut self, query: &Self::Query) -> Result<Vec<u64>>;
 }
@@ -99,7 +94,7 @@ mod mysql {
         }
     }
 
-    impl Source for MySqlSource {
+    impl Database for MySqlSource {
         type Query = MySqlQuery;
 
         fn execute(&mut self, query: &MySqlQuery) -> Result<Vec<u64>> {

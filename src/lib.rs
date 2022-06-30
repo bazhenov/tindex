@@ -28,13 +28,19 @@ pub mod prelude {
         OpeningIndexFile(PathBuf),
 
         #[error("Reading config file: {0}")]
-        ReadingConfigFile(PathBuf),
+        ReadingConfig(PathBuf),
 
         #[error("Connecting source: {0}")]
         ConnectingSource(String),
 
         #[error("Parsing query: '{0}'")]
         ParsingQuery(String),
+
+        #[error("Query worker failed")]
+        QueryWorkerFailed,
+
+        #[error("Query worker panic")]
+        QueryWorkerPanic,
     }
 }
 
@@ -236,6 +242,7 @@ impl PostingList for Exclude {
 pub struct RangePostingList(pub Range<u64>);
 
 impl RangePostingList {
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u64 {
         self.0.end - self.0.start
     }
