@@ -16,7 +16,8 @@ struct Args {
 #[derive(Parser, Debug)]
 enum Subcommand {
     Serve(cli::serve::Opts),
-    Index(cli::indexer::Opts),
+    Index(cli::indexer::IndexOpts),
+    Update(cli::indexer::UpdateOpts),
     Query(cli::query::Opts),
 }
 
@@ -26,7 +27,8 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     match Args::parse().action {
-        Subcommand::Index(opts) => cli::indexer::main(opts)?,
+        Subcommand::Index(opts) => cli::indexer::do_index(opts)?,
+        Subcommand::Update(opts) => cli::indexer::do_update(opts)?,
         Subcommand::Serve(opts) => cli::serve::main(opts).await?,
         Subcommand::Query(opts) => cli::query::main(opts).await?,
     }

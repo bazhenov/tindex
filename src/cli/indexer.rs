@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use cron::Schedule;
 use std::{
-    collections::BinaryHeap,
+    collections::{BinaryHeap, HashSet},
     env,
     fs::File,
     path::PathBuf,
@@ -16,13 +16,14 @@ use std::{
 };
 
 #[derive(Parser, Debug)]
-pub struct Opts {
+pub struct IndexOpts {
     #[clap(long, default_value = "config.yaml")]
     config: PathBuf,
     path: PathBuf,
 }
 
-pub fn main(opts: Opts) -> Result<()> {
+/// Запускает цикл обновления всех запросов в соответствии с расписанием
+pub fn do_index(opts: IndexOpts) -> Result<()> {
     let config = read_config(&opts.config).context(ReadingConfig(opts.config))?;
 
     let mut handles = vec![];
@@ -43,6 +44,38 @@ pub fn main(opts: Opts) -> Result<()> {
     Ok(())
 }
 
+#[derive(Parser, Debug)]
+pub struct UpdateOpts {
+    #[clap(long, default_value = "config.yaml")]
+    config: PathBuf,
+    path: PathBuf,
+    queries: Vec<String>,
+}
+
+/// Обновляет указанные запросы по имени
+pub fn do_update(opts: UpdateOpts) -> Result<()> {
+    let config = read_config(&opts.config).context(ReadingConfig(opts.config))?;
+
+    let mut requested_queries = HashSet::new();
+    requested_queries.extend(opts.queries);
+
+    for mysql in config.mysql {
+        let queries = mysql
+            .queries
+            .iter()
+            .filter(|q| requested_queries.contains(q.name()))
+            .collect::<Vec<_>>();
+        if !queries.is_empty() {
+            let mut db = mysql::connect(&mysql).context(ConnectingSource(mysql.name.clone()))?;
+            for q in queries {
+                process_query(&mut db, &q, &opts.path)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn db_worker<DB: Database>(mut db: DB, queries: Vec<DB::Query>, path: PathBuf) -> Result<()> {
     let mut heap = BinaryHeap::new();
 
@@ -53,18 +86,21 @@ fn db_worker<DB: Database>(mut db: DB, queries: Vec<DB::Query>, path: PathBuf) -
     // Извлекаем самый ближайший запланированный запрос
     while let Some(ScheduledQuery(time, q)) = heap.pop() {
         sleep_until(time);
-
-        info!("Querying {} {} {}...", db.name(), q.name(), time);
-        let path = path.join(q.name()).with_extension("idx");
-
-        let mut ids = db.execute(&q)?;
-        ids.sort_unstable();
-        let file = File::create(&path)?;
-        write(ids, PlainTextEncoder(file))?;
-
+        process_query(&mut db, &q, &path)?;
         ScheduledQuery::schedule_next(q, &mut heap);
     }
 
+    Ok(())
+}
+
+fn process_query<DB: Database>(db: &mut DB, query: &DB::Query, path: &PathBuf) -> Result<()> {
+    info!("Querying {} {}...", db.name(), query.name());
+    let path = path.join(query.name()).with_extension("idx");
+
+    let mut ids = db.execute(&query)?;
+    ids.sort_unstable();
+    let file = File::create(&path)?;
+    write(ids, PlainTextEncoder(file))?;
     Ok(())
 }
 
