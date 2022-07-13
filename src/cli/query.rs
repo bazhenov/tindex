@@ -13,7 +13,7 @@ pub async fn main(opts: Opts) -> Result<()> {
     let index = DirectoryIndex(opts.path);
 
     let query = opts.query;
-    let mut list = parse_query(&query, &index).context(ParsingQuery(query))?;
+    let mut list = parse_query(&query, &index)?;
     while let Some(id) = list.next()? {
         println!("{}", id);
     }

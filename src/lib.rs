@@ -27,18 +27,6 @@ pub mod prelude {
         #[error("Opening index file: {0}")]
         OpeningIndexFile(PathBuf),
 
-        #[error("Reading config file: {0}")]
-        ReadingConfig(PathBuf),
-
-        #[error("Connecting source: {0}")]
-        ConnectingSource(String),
-
-        #[error("Parsing query: '{0}'")]
-        ParsingQuery(String),
-
-        #[error("Query worker failed")]
-        QueryWorkerFailed,
-
         #[error("Query worker panic")]
         QueryWorkerPanic,
     }

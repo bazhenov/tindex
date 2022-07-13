@@ -6,6 +6,7 @@ use auditorium::{
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use cron::Schedule;
+use fn_error_context::context;
 use std::{
     collections::{BinaryHeap, HashSet},
     env,
@@ -24,11 +25,11 @@ pub struct IndexOpts {
 
 /// Запускает цикл обновления всех запросов в соответствии с расписанием
 pub fn do_index(opts: IndexOpts) -> Result<()> {
-    let config = read_config(&opts.config).context(ReadingConfig(opts.config))?;
+    let config = read_config(&opts.config)?;
 
     let mut handles = vec![];
     for mysql in config.mysql {
-        let db = mysql::connect(&mysql).context(ConnectingSource(mysql.name.clone()))?;
+        let db = mysql::connect(&mysql)?;
 
         let path = opts.path.clone();
         let handle = thread::spawn(move || db_worker(db, mysql.queries, path));
@@ -38,7 +39,7 @@ pub fn do_index(opts: IndexOpts) -> Result<()> {
     for h in handles {
         h.join()
             .map_err(|_| QueryWorkerPanic)?
-            .context(QueryWorkerFailed)?;
+            .context("Query worker failed")?;
     }
 
     Ok(())
@@ -54,25 +55,41 @@ pub struct UpdateOpts {
 
 /// Обновляет указанные запросы по имени
 pub fn do_update(opts: UpdateOpts) -> Result<()> {
-    let config = read_config(&opts.config).context(ReadingConfig(opts.config))?;
+    let config = read_config(&opts.config)?;
 
-    let mut requested_queries = HashSet::new();
-    requested_queries.extend(opts.queries);
+    let mut query_names = HashSet::new();
+    query_names.extend(opts.queries);
 
-    for mysql in config.mysql {
-        let queries = mysql
-            .queries
-            .iter()
-            .filter(|q| requested_queries.contains(q.name()))
-            .collect::<Vec<_>>();
-        if !queries.is_empty() {
-            let mut db = mysql::connect(&mysql).context(ConnectingSource(mysql.name.clone()))?;
-            for q in queries {
-                process_query(&mut db, &q, &opts.path)?;
-            }
-        }
+    for mysql in &config.mysql {
+        run_queries(
+            &query_names,
+            &mysql.queries,
+            mysql::connect,
+            mysql,
+            &opts.path,
+        )?;
     }
 
+    Ok(())
+}
+
+fn run_queries<T, DB: Database>(
+    query_names: &HashSet<String>,
+    queries: &Vec<DB::Query>,
+    connector: fn(&T) -> Result<DB>,
+    db_config: &T,
+    path: &PathBuf,
+) -> Result<()> {
+    let queries = queries
+        .iter()
+        .filter(|q| query_names.contains(q.name()))
+        .collect::<Vec<_>>();
+    if !queries.is_empty() {
+        let mut db = connector(db_config)?;
+        for query in queries {
+            process_query(&mut db, query, &path)?;
+        }
+    }
     Ok(())
 }
 
@@ -93,6 +110,7 @@ fn db_worker<DB: Database>(mut db: DB, queries: Vec<DB::Query>, path: PathBuf) -
     Ok(())
 }
 
+#[context("Processing query {} on database {}", query.name(), db.name())]
 fn process_query<DB: Database>(db: &mut DB, query: &DB::Query, path: &PathBuf) -> Result<()> {
     info!("Querying {} {}...", db.name(), query.name());
     let path = path.join(query.name()).with_extension("idx");
@@ -143,6 +161,7 @@ impl<Q> PartialEq for ScheduledQuery<Q> {
     }
 }
 
+#[context("Reading config: {}", path.display())]
 fn read_config(path: &PathBuf) -> Result<Config> {
     let file = File::open(path)?;
     let config = serde_yaml::from_reader(file)?;
@@ -175,6 +194,7 @@ mod mysql {
     use super::*;
     use ::mysql::{prelude::Queryable, Conn, Opts};
 
+    #[context("Connecting to MySQL: {}", mysql.name)]
     pub fn connect(mysql: &MySqlServer) -> Result<MySqlSource> {
         trace!("Connecting mysql source {}...", mysql.name);
         let var_name = format!("{}_MYSQL_URL", mysql.name.to_uppercase());

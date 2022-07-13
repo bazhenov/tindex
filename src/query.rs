@@ -3,6 +3,7 @@
 //! Для токенизации используется библиотека [PEST](https://github.com/pest-parser/pest).
 use crate::{prelude::*, Exclude, Index, Intersect, Merge, PostingList};
 use anyhow::bail;
+use fn_error_context::context;
 use pest::{iterators::Pairs, Parser};
 
 #[derive(Parser)]
@@ -20,6 +21,7 @@ enum Ast {
 /// Выполняет парсинг запроса
 ///
 /// Возвращает [PostingList] готовый к итерации. Индивидуальные термы по имени ищутся в переданном экземпляре [Index].
+#[context("Parsing query: {}", query)]
 pub fn parse_query(query: &str, index: &impl Index) -> Result<Box<dyn PostingList>> {
     let tokens = QueryParser::parse(Rule::root, query)?;
     let ast = parse_ast(tokens)?;

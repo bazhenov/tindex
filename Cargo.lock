@@ -147,6 +147,7 @@ dependencies = [
  "cron",
  "dotenv",
  "env_logger",
+ "fn-error-context",
  "futures",
  "log",
  "mysql",
@@ -765,6 +766,17 @@ dependencies = [
  "crc32fast",
  "libz-sys",
  "miniz_oxide",
+]
+
+[[package]]
+name = "fn-error-context"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "236b4e4ae2b8be5f7a5652f6108c4a0f2627c569db4e7923333d31c7dbfed0fb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

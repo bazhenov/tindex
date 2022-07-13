@@ -59,7 +59,9 @@ mod tests {
                     name: "slave".to_string(),
                     queries: vec![MySqlQuery {
                         name: "bulletin_1_week".to_string(),
-                        schedule: Schedule::from_str("0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2")?,
+                        schedule: Schedule::from_str(
+                            "0   30   9,12,15     1,15       May-Aug  Mon,Wed,Fri  2018/2",
+                        )?,
                         sql: "SELECT 1".to_string(),
                     }],
                 },
