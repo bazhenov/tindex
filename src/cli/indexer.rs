@@ -1,15 +1,14 @@
 use auditorium::{
-    config::{Config, MySqlQuery, MySqlServer},
+    config::{Connection, Database, Query},
     encoding::{Encoder, PlainTextEncoder},
+    mysql::{self, Config},
     prelude::*,
 };
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use cron::Schedule;
 use fn_error_context::context;
 use std::{
     collections::{BinaryHeap, HashSet},
-    env,
     fs::File,
     path::PathBuf,
     thread::{self, sleep},
@@ -61,39 +60,28 @@ pub fn do_update(opts: UpdateOpts) -> Result<()> {
     query_names.extend(opts.queries);
 
     for mysql in &config.mysql {
-        run_queries(
-            &query_names,
-            &mysql.queries,
-            mysql::connect,
-            mysql,
-            &opts.path,
-        )?;
+        run_queries(mysql, &query_names, &opts.path)?;
     }
 
     Ok(())
 }
 
-fn run_queries<T, DB: Database>(
-    query_names: &HashSet<String>,
-    queries: &Vec<DB::Query>,
-    connector: fn(&T) -> Result<DB>,
-    db_config: &T,
-    path: &PathBuf,
-) -> Result<()> {
-    let queries = queries
+fn run_queries(db: &impl Database, query_names: &HashSet<String>, path: &PathBuf) -> Result<()> {
+    let queries = db
+        .list_queries()
         .iter()
         .filter(|q| query_names.contains(q.name()))
         .collect::<Vec<_>>();
     if !queries.is_empty() {
-        let mut db = connector(db_config)?;
+        let mut connection = db.connect()?;
         for query in queries {
-            process_query(&mut db, query, &path)?;
+            process_query(&mut connection, query, &path)?;
         }
     }
     Ok(())
 }
 
-fn db_worker<DB: Database>(mut db: DB, queries: Vec<DB::Query>, path: PathBuf) -> Result<()> {
+fn db_worker<C: Connection>(mut db: C, queries: Vec<C::Query>, path: PathBuf) -> Result<()> {
     let mut heap = BinaryHeap::new();
 
     for q in queries {
@@ -111,7 +99,7 @@ fn db_worker<DB: Database>(mut db: DB, queries: Vec<DB::Query>, path: PathBuf) -
 }
 
 #[context("Processing query {} on database {}", query.name(), db.name())]
-fn process_query<DB: Database>(db: &mut DB, query: &DB::Query, path: &PathBuf) -> Result<()> {
+fn process_query<C: Connection>(db: &mut C, query: &C::Query, path: &PathBuf) -> Result<()> {
     info!("Querying {} {}...", db.name(), query.name());
     let path = path.join(query.name()).with_extension("idx");
 
@@ -130,10 +118,12 @@ fn sleep_until(time: DateTime<Utc>) {
 
 /// Запланированное выполнение запроса
 ///
-/// Содержит запрос и время когда этот запрос по плану должен быть выполнен.
+/// Содержит запрос и время когда этот запрос по плану должен быть выполнен. Эту
+/// структуру можно использовать совместно с `BinaryHeap` для определения какой запрос должен быть выполнен
+/// в первую очередь
 struct ScheduledQuery<Q>(DateTime<Utc>, Q);
 
-impl<Q: NamedQuery> ScheduledQuery<Q> {
+impl<Q: Query> ScheduledQuery<Q> {
     fn schedule_next(q: Q, heap: &mut BinaryHeap<ScheduledQuery<Q>>) {
         if let Some(next_time) = q.schedule().upcoming(Utc).next() {
             heap.push(Self(next_time, q))
@@ -173,56 +163,4 @@ fn write(rows: impl IntoIterator<Item = u64>, mut sink: impl Encoder) -> Result<
         sink.write(id)?;
     }
     Ok(())
-}
-
-trait NamedQuery {
-    fn name(&self) -> &str;
-
-    fn schedule(&self) -> &Schedule;
-}
-
-trait Database {
-    type Query: NamedQuery;
-
-    fn name(&self) -> &str;
-
-    fn execute(&mut self, query: &Self::Query) -> Result<Vec<u64>>;
-}
-
-/// Код позволяющий системе читать данные из MySQL
-mod mysql {
-    use super::*;
-    use ::mysql::{prelude::Queryable, Conn, Opts};
-
-    #[context("Connecting to MySQL: {}", mysql.name)]
-    pub fn connect(mysql: &MySqlServer) -> Result<MySqlSource> {
-        trace!("Connecting mysql source {}...", mysql.name);
-        let var_name = format!("{}_MYSQL_URL", mysql.name.to_uppercase());
-        let url = env::var(var_name)?;
-        let conn = Conn::new(Opts::from_url(&url)?)?;
-        Ok(MySqlSource(mysql.name.to_owned(), conn))
-    }
-
-    pub struct MySqlSource(String, Conn);
-
-    impl NamedQuery for MySqlQuery {
-        fn name(&self) -> &str {
-            &self.name
-        }
-
-        fn schedule(&self) -> &Schedule {
-            &self.schedule
-        }
-    }
-
-    impl Database for MySqlSource {
-        type Query = MySqlQuery;
-
-        fn name(&self) -> &str {
-            &self.0
-        }
-        fn execute(&mut self, query: &MySqlQuery) -> Result<Vec<u64>> {
-            Ok(self.1.exec_map(&query.sql, (), |id| id)?)
-        }
-    }
 }

@@ -6,8 +6,8 @@ use encoding::PlainTextDecoder;
 use prelude::*;
 use std::{fs::File, io::BufReader, ops::Range, path::PathBuf};
 
-pub mod config;
 pub mod encoding;
+pub mod mysql;
 pub mod query;
 
 pub mod prelude {
@@ -239,6 +239,30 @@ impl RangePostingList {
 impl PostingList for RangePostingList {
     fn next(&mut self) -> Result<Option<u64>> {
         Ok(self.0.next())
+    }
+}
+
+pub mod config {
+    use super::*;
+    use cron::Schedule;
+
+    pub trait Database {
+        type Connection: Connection;
+
+        fn connect(&self) -> Result<Self::Connection>;
+        fn list_queries(&self) -> &[<Self::Connection as Connection>::Query];
+    }
+
+    pub trait Query {
+        fn name(&self) -> &str;
+        fn schedule(&self) -> &Schedule;
+    }
+
+    pub trait Connection {
+        type Query: Query;
+
+        fn name(&self) -> &str;
+        fn execute(&mut self, query: &Self::Query) -> Result<Vec<u64>>;
     }
 }
 

@@ -1,8 +1,13 @@
 //! Код работы с конфигурацией в YAML-формате
-use std::str::FromStr;
-
+use crate::{
+    config::{Connection, Database, Query},
+    prelude::*,
+};
+use ::mysql::{prelude::Queryable, Conn, Opts};
 use cron::Schedule;
+use fn_error_context::context;
 use serde::{de::Error, Deserialize, Deserializer};
+use std::{env, str::FromStr};
 
 #[derive(Deserialize, PartialEq, Eq, Debug)]
 pub struct Config {
@@ -15,6 +20,31 @@ pub struct MySqlServer {
     pub queries: Vec<MySqlQuery>,
 }
 
+impl Database for MySqlServer {
+    type Connection = MySqlSource;
+
+    fn connect(&self) -> Result<MySqlSource> {
+        connect(self)
+    }
+
+    fn list_queries(&self) -> &[MySqlQuery] {
+        &self.queries[..]
+    }
+}
+
+pub struct MySqlSource(String, Conn);
+
+impl Connection for MySqlSource {
+    type Query = MySqlQuery;
+
+    fn name(&self) -> &str {
+        &self.0
+    }
+    fn execute(&mut self, query: &MySqlQuery) -> Result<Vec<u64>> {
+        Ok(self.1.exec_map(&query.sql, (), |id| id)?)
+    }
+}
+
 #[derive(Deserialize, PartialEq, Eq, Debug)]
 pub struct MySqlQuery {
     pub name: String,
@@ -23,7 +53,17 @@ pub struct MySqlQuery {
     pub sql: String,
 }
 
-fn schedule_from_string<'de, D>(deserializer: D) -> Result<Schedule, D::Error>
+impl Query for MySqlQuery {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn schedule(&self) -> &Schedule {
+        &self.schedule
+    }
+}
+
+fn schedule_from_string<'de, D>(deserializer: D) -> std::result::Result<Schedule, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -31,10 +71,18 @@ where
     Schedule::from_str(&s).map_err(D::Error::custom)
 }
 
+#[context("Connecting to MySQL: {}", mysql.name)]
+pub fn connect(mysql: &MySqlServer) -> Result<MySqlSource> {
+    trace!("Connecting mysql source {}...", mysql.name);
+    let var_name = format!("{}_MYSQL_URL", mysql.name.to_uppercase());
+    let url = env::var(var_name)?;
+    let conn = Conn::new(Opts::from_url(&url)?)?;
+    Ok(MySqlSource(mysql.name.to_owned(), conn))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn read_yaml() -> Result<()> {
