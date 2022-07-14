@@ -1,7 +1,7 @@
 mod cli;
 
-pub use auditorium::prelude;
-use auditorium::prelude::*;
+pub use tindex::prelude;
+use tindex::prelude::*;
 use clap::Parser;
 use dotenv::dotenv;
 extern crate rocket;

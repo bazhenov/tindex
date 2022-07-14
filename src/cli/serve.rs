@@ -1,4 +1,4 @@
-use auditorium::{prelude::*, query::parse_query, DirectoryIndex};
+use tindex::{prelude::*, query::parse_query, DirectoryIndex};
 use clap::Parser;
 use rocket::{get, http::Status, routes, State};
 use std::{cmp::Ordering, ops::Deref, path::PathBuf};

@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use auditorium::{query::parse_query, DirectoryIndex};
+use tindex::{query::parse_query, DirectoryIndex};
 use clap::Parser;
 use std::path::PathBuf;
 

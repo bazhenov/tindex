@@ -1,4 +1,4 @@
-use auditorium::{
+use tindex::{
     config::{Config, Connection, Database, Query},
     encoding::{Encoder, PlainTextEncoder},
     prelude::*,
