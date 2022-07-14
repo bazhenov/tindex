@@ -245,6 +245,21 @@ impl PostingList for RangePostingList {
 pub mod config {
     use super::*;
     use cron::Schedule;
+    use serde::{de::Error, Deserialize, Deserializer};
+    use std::str::FromStr;
+
+    #[derive(Deserialize, PartialEq, Eq, Debug)]
+    pub struct Config {
+        pub mysql: Vec<mysql::MySqlDatabase>,
+    }
+
+    pub fn schedule_from_string<'de, D>(deserializer: D) -> std::result::Result<Schedule, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: String = Deserialize::deserialize(deserializer)?;
+        Schedule::from_str(&s).map_err(D::Error::custom)
+    }
 
     pub trait Database {
         type Connection: Connection;
@@ -253,9 +268,9 @@ pub mod config {
         fn list_queries(&self) -> &[<Self::Connection as Connection>::Query];
     }
 
-    pub trait Query {
+    pub trait Query: Clone {
         fn name(&self) -> &str;
-        fn schedule(&self) -> &Schedule;
+        fn schedule(&self) -> &cron::Schedule;
     }
 
     pub trait Connection {

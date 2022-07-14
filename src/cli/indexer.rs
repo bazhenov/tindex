@@ -1,7 +1,6 @@
 use auditorium::{
-    config::{Connection, Database, Query},
+    config::{Config, Connection, Database, Query},
     encoding::{Encoder, PlainTextEncoder},
-    mysql::{self, Config},
     prelude::*,
 };
 use chrono::{DateTime, Utc};
@@ -10,7 +9,7 @@ use fn_error_context::context;
 use std::{
     collections::{BinaryHeap, HashSet},
     fs::File,
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread::{self, sleep},
     time::Duration,
 };
@@ -28,10 +27,8 @@ pub fn do_index(opts: IndexOpts) -> Result<()> {
 
     let mut handles = vec![];
     for mysql in config.mysql {
-        let db = mysql::connect(&mysql)?;
-
         let path = opts.path.clone();
-        let handle = thread::spawn(move || db_worker(db, mysql.queries, path));
+        let handle = thread::spawn(move || db_worker(mysql, path));
         handles.push(handle);
     }
 
@@ -66,44 +63,52 @@ pub fn do_update(opts: UpdateOpts) -> Result<()> {
     Ok(())
 }
 
-fn run_queries(db: &impl Database, query_names: &HashSet<String>, path: &PathBuf) -> Result<()> {
+fn run_queries(db: &impl Database, query_names: &HashSet<String>, path: &Path) -> Result<()> {
     let queries = db
         .list_queries()
         .iter()
         .filter(|q| query_names.contains(q.name()))
         .collect::<Vec<_>>();
     if !queries.is_empty() {
-        let mut connection = db.connect()?;
+        let mut conn = db.connect()?;
         for query in queries {
-            process_query(&mut connection, query, &path)?;
+            process_query(&mut conn, query, path)?;
         }
     }
     Ok(())
 }
 
-fn db_worker<C: Connection>(mut db: C, queries: Vec<C::Query>, path: PathBuf) -> Result<()> {
+fn db_worker<DB: Database>(d: DB, path: PathBuf) -> Result<()> {
     let mut heap = BinaryHeap::new();
 
-    for q in queries {
-        ScheduledQuery::schedule_next(q, &mut heap)
+    for q in d.list_queries() {
+        schedule_next(q.to_owned(), &mut heap)
     }
 
+    let mut conn = d.connect()?;
     // Извлекаем самый ближайший запланированный запрос
     while let Some(ScheduledQuery(time, q)) = heap.pop() {
         sleep_until(time);
-        process_query(&mut db, &q, &path)?;
-        ScheduledQuery::schedule_next(q, &mut heap);
+        process_query(&mut conn, &q, &path)?;
+        schedule_next(q, &mut heap);
     }
 
     Ok(())
 }
 
+fn schedule_next<Q: Query>(q: Q, heap: &mut BinaryHeap<ScheduledQuery<Q>>) {
+    if let Some(next_time) = q.schedule().upcoming(Utc).next() {
+        info!("Query {} next execution is {}", q.name(), next_time);
+        heap.push(ScheduledQuery(next_time, q))
+    }
+}
+
 #[context("Processing query {} on database {}", query.name(), db.name())]
-fn process_query<C: Connection>(db: &mut C, query: &C::Query, path: &PathBuf) -> Result<()> {
+fn process_query<C: Connection>(db: &mut C, query: &C::Query, path: &Path) -> Result<()> {
     info!("Querying {} {}...", db.name(), query.name());
     let path = path.join(query.name()).with_extension("idx");
 
-    let mut ids = db.execute(&query)?;
+    let mut ids = db.execute(query)?;
     ids.sort_unstable();
     let file = File::create(&path)?;
     write(ids, PlainTextEncoder(file))?;
@@ -122,15 +127,6 @@ fn sleep_until(time: DateTime<Utc>) {
 /// структуру можно использовать совместно с `BinaryHeap` для определения какой запрос должен быть выполнен
 /// в первую очередь
 struct ScheduledQuery<Q>(DateTime<Utc>, Q);
-
-impl<Q: Query> ScheduledQuery<Q> {
-    fn schedule_next(q: Q, heap: &mut BinaryHeap<ScheduledQuery<Q>>) {
-        if let Some(next_time) = q.schedule().upcoming(Utc).next() {
-            info!("Query {} next execution is {}", q.name(), next_time);
-            heap.push(Self(next_time, q))
-        }
-    }
-}
 
 impl<Q> Eq for ScheduledQuery<Q> {}
 
