@@ -1,11 +1,10 @@
-use std::env;
-
 use crate::config::{self, Connection};
 use crate::config::{Database, Query};
 use crate::prelude::*;
 use clickhouse::Client;
 use cron::Schedule;
 use serde::Deserialize;
+use std::env;
 
 #[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct ClickhouseDatabase {

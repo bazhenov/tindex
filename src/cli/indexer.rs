@@ -7,10 +7,10 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use fn_error_context::context;
 use std::{
-    collections::{BinaryHeap, HashSet},
+    collections::{BinaryHeap, HashSet, LinkedList},
     fs::File,
     path::{Path, PathBuf},
-    thread::{self, sleep},
+    thread::{self, sleep, JoinHandle},
     time::Duration,
 };
 
@@ -25,25 +25,49 @@ pub struct IndexOpts {
 pub fn do_index(opts: IndexOpts) -> Result<()> {
     let config = read_config(&opts.config)?;
 
+    let mut handles = LinkedList::new();
+    handles.extend(start_workers(config.mysql, &opts));
+    handles.extend(start_workers(config.clickhouse, &opts));
+    wait_for_all_workers(handles)
+}
+
+/// Запускает потоки (по одному на БД) и возвращает из [`JoinHandle`]'ы
+fn start_workers<DB: Database + Send + 'static>(
+    databases: Option<Vec<DB>>,
+    opts: &IndexOpts,
+) -> Vec<JoinHandle<Result<()>>> {
     let mut handles = vec![];
-    for mysql in config.mysql.unwrap_or_default() {
+    let databases = databases.unwrap_or_default();
+    for db in databases {
         let path = opts.path.clone();
-        let handle = thread::spawn(move || db_worker(mysql, path));
+        let handle = thread::spawn(move || db_worker(db, path));
         handles.push(handle);
     }
+    handles
+}
 
-    for clickhouse in config.clickhouse.unwrap_or_default() {
-        let path = opts.path.clone();
-        let handle = thread::spawn(move || db_worker(clickhouse, path));
-        handles.push(handle);
+/// Блокирует выполнение до тех пор пока все потоки не будут выполнены или один из них не вернет отказ
+///
+/// В стандартной библотеке нет метода для блокировки до момента когда будет завершен один [`JoinHandle`] из набора.
+/// Поэтому, этот метод через polling пытается определить какие из handle уже завершены, после чего проверяет их
+/// результат и снимает их с мониторинга.
+fn wait_for_all_workers<T>(mut handles: LinkedList<JoinHandle<Result<T>>>) -> Result<()> {
+    while !handles.is_empty() {
+        for _ in 0..handles.len() {
+            // так как мы итерируемся строго по длине списка, в голове списка всегда есть элемент
+            let handle = handles.pop_front().unwrap();
+
+            if handle.is_finished() {
+                handle
+                    .join()
+                    .map_err(|_| QueryWorkerPanic)?
+                    .context("Query worker failed")?;
+            } else {
+                handles.push_back(handle);
+            }
+        }
+        sleep(Duration::from_millis(100));
     }
-
-    for h in handles {
-        h.join()
-            .map_err(|_| QueryWorkerPanic)?
-            .context("Query worker failed")?;
-    }
-
     Ok(())
 }
 
@@ -82,7 +106,7 @@ fn run_queries(db: &impl Database, query_names: &HashSet<String>, path: &Path) -
     if !queries.is_empty() {
         let mut conn = db.connect()?;
         for query in queries {
-            process_query(&mut conn, query, path)?;
+            run_query(&mut conn, query, path)?;
         }
     }
     Ok(())
@@ -99,7 +123,7 @@ fn db_worker<DB: Database>(d: DB, path: PathBuf) -> Result<()> {
     // Извлекаем самый ближайший запланированный запрос
     while let Some(ScheduledQuery(time, q)) = heap.pop() {
         sleep_until(time);
-        process_query(&mut conn, &q, &path)?;
+        run_query(&mut conn, &q, &path)?;
         schedule_next(q, &mut heap);
     }
 
@@ -114,7 +138,7 @@ fn schedule_next<Q: Query>(q: Q, heap: &mut BinaryHeap<ScheduledQuery<Q>>) {
 }
 
 #[context("Processing query {} on database {}", query.name(), db.name())]
-fn process_query<C: Connection>(db: &mut C, query: &C::Query, path: &Path) -> Result<()> {
+fn run_query<C: Connection>(db: &mut C, query: &C::Query, path: &Path) -> Result<()> {
     info!("Query run (name: {}, db: {})", db.name(), query.name());
     let path = path.join(query.name()).with_extension("idx");
 

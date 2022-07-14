@@ -1,4 +1,3 @@
-//! Код работы с конфигурацией в YAML-формате
 use crate::{
     config::{self, Connection, Database, Query},
     prelude::*,
