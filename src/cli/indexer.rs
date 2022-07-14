@@ -126,6 +126,7 @@ struct ScheduledQuery<Q>(DateTime<Utc>, Q);
 impl<Q: Query> ScheduledQuery<Q> {
     fn schedule_next(q: Q, heap: &mut BinaryHeap<ScheduledQuery<Q>>) {
         if let Some(next_time) = q.schedule().upcoming(Utc).next() {
+            info!("Query {} next execution is {}", q.name(), next_time);
             heap.push(Self(next_time, q))
         }
     }
