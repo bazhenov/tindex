@@ -4,8 +4,12 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
+#[clap(about = "Running query over index")]
 pub struct Opts {
+    /// path to an index
     path: PathBuf,
+
+    /// query to run (eg. "crit1 & crit2")
     query: String,
 }
 

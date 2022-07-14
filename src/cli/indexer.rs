@@ -15,9 +15,12 @@ use std::{
 };
 
 #[derive(Parser, Debug)]
+#[clap(about = "Run indexation for all queries in a config")]
 pub struct IndexOpts {
     #[clap(long, default_value = "config.yaml")]
     config: PathBuf,
+
+    /// path to an index
     path: PathBuf,
 }
 
@@ -72,10 +75,15 @@ fn wait_for_all_workers<T>(mut handles: LinkedList<JoinHandle<Result<T>>>) -> Re
 }
 
 #[derive(Parser, Debug)]
+#[clap(about = "Updates single query in an index")]
 pub struct UpdateOpts {
     #[clap(long, default_value = "config.yaml")]
     config: PathBuf,
+    
+    /// path to an index
     path: PathBuf,
+
+    /// names of queries to update
     queries: Vec<String>,
 }
 

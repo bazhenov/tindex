@@ -4,7 +4,9 @@ use rocket::{get, http::Status, routes, State};
 use std::{cmp::Ordering, ops::Deref, path::PathBuf};
 
 #[derive(Parser, Debug)]
+#[clap(about = "Run REST API HTTP-server for a given index")]
 pub struct Opts {
+    /// path to an index
     path: PathBuf,
 }
 
