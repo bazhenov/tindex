@@ -8,6 +8,7 @@ use std::{fs::File, io::BufReader, ops::Range, path::PathBuf};
 
 pub mod encoding;
 pub mod mysql;
+pub mod clickhouse;
 pub mod query;
 
 pub mod prelude {
@@ -250,7 +251,8 @@ pub mod config {
 
     #[derive(Deserialize, PartialEq, Eq, Debug)]
     pub struct Config {
-        pub mysql: Vec<mysql::MySqlDatabase>,
+        pub mysql: Option<Vec<mysql::MySqlDatabase>>,
+        pub clickhouse: Option<Vec<clickhouse::ClickhouseDatabase>>,
     }
 
     pub fn schedule_from_string<'de, D>(deserializer: D) -> std::result::Result<Schedule, D::Error>

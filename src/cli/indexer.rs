@@ -26,9 +26,15 @@ pub fn do_index(opts: IndexOpts) -> Result<()> {
     let config = read_config(&opts.config)?;
 
     let mut handles = vec![];
-    for mysql in config.mysql {
+    for mysql in config.mysql.unwrap_or(vec![]) {
         let path = opts.path.clone();
         let handle = thread::spawn(move || db_worker(mysql, path));
+        handles.push(handle);
+    }
+
+    for clickhouse in config.clickhouse.unwrap_or(vec![]) {
+        let path = opts.path.clone();
+        let handle = thread::spawn(move || db_worker(clickhouse, path));
         handles.push(handle);
     }
 
@@ -56,8 +62,12 @@ pub fn do_update(opts: UpdateOpts) -> Result<()> {
     let mut query_names = HashSet::new();
     query_names.extend(opts.queries);
 
-    for mysql in &config.mysql {
+    for mysql in &config.mysql.unwrap_or(vec![]) {
         run_queries(mysql, &query_names, &opts.path)?;
+    }
+
+    for clickhouse in &config.clickhouse.unwrap_or(vec![]) {
+        run_queries(clickhouse, &query_names, &opts.path)?;
     }
 
     Ok(())
@@ -105,13 +115,19 @@ fn schedule_next<Q: Query>(q: Q, heap: &mut BinaryHeap<ScheduledQuery<Q>>) {
 
 #[context("Processing query {} on database {}", query.name(), db.name())]
 fn process_query<C: Connection>(db: &mut C, query: &C::Query, path: &Path) -> Result<()> {
-    info!("Querying {} {}...", db.name(), query.name());
+    info!("Query run (name: {}, db: {})", db.name(), query.name());
     let path = path.join(query.name()).with_extension("idx");
 
     let mut ids = db.execute(query)?;
+    let size = ids.len();
     ids.sort_unstable();
     let file = File::create(&path)?;
     write(ids, PlainTextEncoder(file))?;
+    info!(
+        "Query finished (name: {}, records: {})...",
+        query.name(),
+        size
+    );
     Ok(())
 }
 
