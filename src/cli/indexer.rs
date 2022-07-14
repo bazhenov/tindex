@@ -26,13 +26,13 @@ pub fn do_index(opts: IndexOpts) -> Result<()> {
     let config = read_config(&opts.config)?;
 
     let mut handles = vec![];
-    for mysql in config.mysql.unwrap_or(vec![]) {
+    for mysql in config.mysql.unwrap_or_default() {
         let path = opts.path.clone();
         let handle = thread::spawn(move || db_worker(mysql, path));
         handles.push(handle);
     }
 
-    for clickhouse in config.clickhouse.unwrap_or(vec![]) {
+    for clickhouse in config.clickhouse.unwrap_or_default() {
         let path = opts.path.clone();
         let handle = thread::spawn(move || db_worker(clickhouse, path));
         handles.push(handle);
@@ -62,11 +62,11 @@ pub fn do_update(opts: UpdateOpts) -> Result<()> {
     let mut query_names = HashSet::new();
     query_names.extend(opts.queries);
 
-    for mysql in &config.mysql.unwrap_or(vec![]) {
+    for mysql in &config.mysql.unwrap_or_default() {
         run_queries(mysql, &query_names, &opts.path)?;
     }
 
-    for clickhouse in &config.clickhouse.unwrap_or(vec![]) {
+    for clickhouse in &config.clickhouse.unwrap_or_default() {
         run_queries(clickhouse, &query_names, &opts.path)?;
     }
 

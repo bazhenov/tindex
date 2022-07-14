@@ -6,13 +6,15 @@ use crate::{
 use ::mysql::{prelude::Queryable, Conn, Opts};
 use cron::Schedule;
 use fn_error_context::context;
+use mysql::OptsBuilder;
 use serde::Deserialize;
 use std::env;
 
 #[derive(Deserialize, PartialEq, Eq, Debug)]
 pub struct MySqlDatabase {
-    pub name: String,
-    pub queries: Vec<MySqlQuery>,
+    name: String,
+    url: String,
+    queries: Vec<MySqlQuery>,
 }
 
 impl Database for MySqlDatabase {
@@ -20,10 +22,19 @@ impl Database for MySqlDatabase {
 
     #[context("Connecting to MySQL: {}", self.name)]
     fn connect(&self) -> Result<Self::Connection> {
-        trace!("Connecting mysql source {}...", self.name);
-        let var_name = format!("{}_MYSQL_URL", self.name.to_uppercase());
-        let url = env::var(var_name)?;
-        let conn = Conn::new(Opts::from_url(&url)?)?;
+        let mut opts = OptsBuilder::from_opts(Opts::from_url(&self.url)?);
+
+        let user_var_name = format!("MYSQL_{}_USER", self.name.to_uppercase());
+        if let Ok(user) = env::var(user_var_name) {
+            opts = opts.user(Some(user));
+        }
+
+        let pass_var_name = format!("MYSQL_{}_PASSWORD", self.name.to_uppercase());
+        if let Ok(password) = env::var(pass_var_name) {
+            opts = opts.pass(Some(password));
+        }
+
+        let conn = Conn::new(opts)?;
         Ok(MySqlConnection(self.name.to_owned(), conn))
     }
 
@@ -48,10 +59,10 @@ impl Connection for MySqlConnection {
 
 #[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct MySqlQuery {
-    pub name: String,
+    name: String,
     #[serde(deserialize_with = "config::schedule_from_string")]
-    pub schedule: Schedule,
-    pub sql: String,
+    schedule: Schedule,
+    sql: String,
 }
 
 impl Query for MySqlQuery {
@@ -74,6 +85,7 @@ mod tests {
         let config: MySqlDatabase = serde_yaml::from_str(
             r#"
             name: slave
+            url: mysql://
             queries:
             - name: bulletin_1_week
               schedule: "0 30 9,12,15 1,15 May-Aug Mon,Wed,Fri 2018/2"
@@ -82,6 +94,7 @@ mod tests {
         )?;
         let expected = MySqlDatabase {
             name: "slave".to_string(),
+            url: "mysql://".to_string(),
             queries: vec![MySqlQuery {
                 name: "bulletin_1_week".to_string(),
                 schedule: Schedule::from_str("0 30 9,12,15 1,15 May-Aug Mon,Wed,Fri 2018/2")?,

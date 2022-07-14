@@ -6,9 +6,9 @@ use encoding::PlainTextDecoder;
 use prelude::*;
 use std::{fs::File, io::BufReader, ops::Range, path::PathBuf};
 
+pub mod clickhouse;
 pub mod encoding;
 pub mod mysql;
-pub mod clickhouse;
 pub mod query;
 
 pub mod prelude {

@@ -20,12 +20,12 @@ impl Database for ClickhouseDatabase {
     fn connect(&self) -> Result<Self::Connection> {
         let mut client = Client::default().with_url(&self.url);
 
-        let user_var_name = format!("{}_CLICKHOUSE_USER", self.name.to_uppercase());
+        let user_var_name = format!("CLICKHOUSE_{}_USER", self.name.to_uppercase());
         if let Ok(user) = env::var(user_var_name) {
             client = client.with_user(user);
         }
 
-        let pass_var_name = format!("{}_CLICKHOUSE_PASSWORD", self.name.to_uppercase());
+        let pass_var_name = format!("CLICKHOUSE_{}_PASSWORD", self.name.to_uppercase());
         if let Ok(password) = env::var(pass_var_name) {
             client = client.with_password(password);
         }
