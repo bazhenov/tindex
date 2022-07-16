@@ -1,9 +1,9 @@
 mod cli;
 
-pub use tindex::prelude;
-use tindex::prelude::*;
 use clap::Parser;
 use dotenv::dotenv;
+pub use tindex::prelude;
+use tindex::prelude::*;
 extern crate rocket;
 
 #[derive(Parser, Debug)]

@@ -1,8 +1,3 @@
-use tindex::{
-    config::{Config, Connection, Database, Query},
-    encoding::{Encoder, PlainTextEncoder},
-    prelude::*,
-};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use fn_error_context::context;
@@ -12,6 +7,11 @@ use std::{
     path::{Path, PathBuf},
     thread::{self, sleep, JoinHandle},
     time::Duration,
+};
+use tindex::{
+    config::{Config, Connection, Database, Query},
+    encoding::{Encoder, PlainTextEncoder},
+    prelude::*,
 };
 
 #[derive(Parser, Debug)]
@@ -79,7 +79,7 @@ fn wait_for_all_workers<T>(mut handles: LinkedList<JoinHandle<Result<T>>>) -> Re
 pub struct UpdateOpts {
     #[clap(long, default_value = "config.yaml")]
     config: PathBuf,
-    
+
     /// path to an index
     path: PathBuf,
 

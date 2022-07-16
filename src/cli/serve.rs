@@ -1,7 +1,7 @@
-use tindex::{prelude::*, query::parse_query, DirectoryIndex};
 use clap::Parser;
 use rocket::{get, http::Status, routes, State};
 use std::{cmp::Ordering, ops::Deref, path::PathBuf};
+use tindex::{prelude::*, query::parse_query, DirectoryIndex};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Run REST API HTTP-server for a given index")]

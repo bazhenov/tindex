@@ -1,7 +1,7 @@
 use crate::prelude::*;
-use tindex::{query::parse_query, DirectoryIndex};
 use clap::Parser;
 use std::path::PathBuf;
+use tindex::{query::parse_query, DirectoryIndex};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Running query over index")]
