@@ -1,4 +1,4 @@
-use crate::{prelude::*, PostingList};
+use crate::{prelude::*, PostingListDecoder};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -31,7 +31,7 @@ impl PlainTextDecoder {
     }
 }
 
-impl PostingList for PlainTextDecoder {
+impl PostingListDecoder for PlainTextDecoder {
     fn next(&mut self) -> Result<Option<u64>> {
         let mut line = String::new();
         let result = self.0.read_line(&mut line)?;

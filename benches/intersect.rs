@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
-use tindex::{exclude, intersect, PostingList, RangePostingList};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
+use tindex::{exclude, intersect, merge, PostingList, RangePostingList};
 
 pub fn posting_list_intersect(c: &mut Criterion) {
     let mut g = c.benchmark_group("Posting List Intersect");
@@ -9,8 +9,8 @@ pub fn posting_list_intersect(c: &mut Criterion) {
         let a = RangePostingList(0..1_000);
         let b = RangePostingList(500..1_000);
         bench.iter_batched(
-            || (a.clone(), b.clone()),
-            |(a, b)| traverse(black_box(intersect(a, b))),
+            || intersect(a.clone().into(), b.clone().into()),
+            traverse,
             BatchSize::SmallInput,
         );
     });
@@ -19,8 +19,8 @@ pub fn posting_list_intersect(c: &mut Criterion) {
     g.bench_function("Full Intersect", |bench| {
         let a = RangePostingList(0..1_000);
         bench.iter_batched(
-            || (a.clone(), a.clone()),
-            |(a, b)| traverse(black_box(intersect(a, b))),
+            || intersect(a.clone().into(), a.clone().into()),
+            traverse,
             BatchSize::SmallInput,
         );
     });
@@ -30,8 +30,8 @@ pub fn posting_list_intersect(c: &mut Criterion) {
         let a = RangePostingList(0..1_000);
         let b = RangePostingList(1_000..2_000);
         bench.iter_batched(
-            || (a.clone(), b.clone()),
-            |(a, b)| traverse(black_box(intersect(a, b))),
+            || intersect(a.clone().into(), b.clone().into()),
+            traverse,
             BatchSize::SmallInput,
         );
     });
@@ -45,8 +45,8 @@ pub fn posting_list_exclude(c: &mut Criterion) {
         let a = RangePostingList(0..1_000);
         let b = RangePostingList(500..1_000);
         bench.iter_batched(
-            || (a.clone(), b.clone()),
-            |(a, b)| traverse(black_box(exclude(a, b))),
+            || exclude(a.clone().into(), b.clone().into()),
+            traverse,
             BatchSize::SmallInput,
         );
     });
@@ -55,8 +55,8 @@ pub fn posting_list_exclude(c: &mut Criterion) {
     g.bench_function("Full Exclude", |bench| {
         let a = RangePostingList(0..1_000);
         bench.iter_batched(
-            || (a.clone(), a.clone()),
-            |(a, b)| traverse(black_box(exclude(a, b))),
+            || exclude(a.clone().into(), a.clone().into()),
+            traverse,
             BatchSize::SmallInput,
         );
     });
@@ -66,8 +66,8 @@ pub fn posting_list_exclude(c: &mut Criterion) {
         let a = RangePostingList(0..1_000);
         let b = RangePostingList(1_000..2_000);
         bench.iter_batched(
-            || (a.clone(), b.clone()),
-            |(a, b)| traverse(black_box(exclude(a, b))),
+            || exclude(a.clone().into(), b.clone().into()),
+            traverse,
             BatchSize::SmallInput,
         );
     });
@@ -81,14 +81,15 @@ pub fn posting_list_merge(c: &mut Criterion) {
     g.throughput(Throughput::Elements(a.len() + b.len()));
     g.bench_function("1M", |bench| {
         bench.iter_batched(
-            || (a.clone(), b.clone()),
-            |(a, b)| traverse(black_box(intersect(a, b))),
+            || merge(a.clone().into(), b.clone().into()),
+            traverse,
             BatchSize::SmallInput,
         );
     });
 }
 
-fn traverse(mut input: impl PostingList) {
+#[inline]
+fn traverse(mut input: PostingList) {
     while input.next().unwrap().is_some() {}
 }
 

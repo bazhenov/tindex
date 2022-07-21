@@ -4,7 +4,7 @@ extern crate pest_derive;
 
 use encoding::PlainTextDecoder;
 use prelude::*;
-use std::{fs::File, io::BufReader, ops::Range, path::PathBuf};
+use std::{ops::Range, path::PathBuf};
 
 pub mod clickhouse;
 pub mod encoding;
@@ -34,7 +34,7 @@ pub mod prelude {
 }
 
 pub trait Index: Send + Sync {
-    type Iterator: PostingList + 'static;
+    type Iterator: PostingListDecoder + 'static;
 
     fn lookup(&self, name: &str) -> Result<Self::Iterator>;
 }
@@ -43,15 +43,14 @@ pub struct DirectoryIndex(pub PathBuf);
 
 impl Index for DirectoryIndex {
     type Iterator = PlainTextDecoder;
+
     fn lookup(&self, name: &str) -> Result<Self::Iterator> {
         let path = self.0.join(format!("{}.idx", name));
-        let file = File::open(&path).context(OpeningIndexFile(path))?;
-
-        Ok(PlainTextDecoder(BufReader::new(file)))
+        PlainTextDecoder::open(&path).context(OpeningIndexFile(path))
     }
 }
 
-pub trait PostingList {
+pub trait PostingListDecoder {
     fn next(&mut self) -> Result<Option<u64>>;
 
     fn to_vec(mut self) -> Result<Vec<u64>>
@@ -66,55 +65,35 @@ pub trait PostingList {
     }
 }
 
-pub fn intersect<A, B>(a: A, b: B) -> impl PostingList
-where
-    A: PostingList + 'static,
-    B: PostingList + 'static,
-{
-    let a: Box<dyn PostingList> = Box::new(a);
-    let b: Box<dyn PostingList> = Box::new(b);
-
-    Intersect(
-        PositionedPostingList(a, None),
-        PositionedPostingList(b, None),
-    )
+pub fn intersect(a: PostingList, b: PostingList) -> PostingList {
+    Intersect(a, b).into()
 }
 
-pub fn merge<A, B>(a: A, b: B) -> impl PostingList
-where
-    A: PostingList + 'static,
-    B: PostingList + 'static,
-{
-    let a: Box<dyn PostingList> = Box::new(a);
-    let b: Box<dyn PostingList> = Box::new(b);
-    Merge(
-        PositionedPostingList(a, None),
-        PositionedPostingList(b, None),
-    )
+pub fn merge(a: PostingList, b: PostingList) -> PostingList {
+    Merge(a, b).into()
 }
 
-pub fn exclude<A, B>(a: A, b: B) -> impl PostingList
-where
-    A: PostingList + 'static,
-    B: PostingList + 'static,
-{
-    let a: Box<dyn PostingList> = Box::new(a);
-    let b: Box<dyn PostingList> = Box::new(b);
-    Exclude(
-        PositionedPostingList(a, None),
-        PositionedPostingList(b, None),
-    )
+pub fn exclude(a: PostingList, b: PostingList) -> PostingList {
+    Exclude(a, b).into()
 }
 
-struct PositionedPostingList(Box<dyn PostingList>, Option<u64>);
+pub struct PostingList(Box<dyn PostingListDecoder>, Option<u64>);
 
-impl PositionedPostingList {
-    fn next(&mut self) -> Result<Option<u64>> {
+impl<T: PostingListDecoder + 'static> From<T> for PostingList {
+    fn from(source: T) -> Self {
+        Self(Box::new(source), None)
+    }
+}
+
+impl PostingList {
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Result<Option<u64>> {
         self.1 = self.0.next()?;
         Ok(self.1)
     }
 
-    fn advance(&mut self, target: u64) -> Result<Option<u64>> {
+    /// Возвращает первый элемент в потоке равный или больший чем переданный `target`
+    pub fn advance(&mut self, target: u64) -> Result<Option<u64>> {
         if let Some(c) = self.1 {
             if c >= target {
                 return Ok(Some(c));
@@ -128,7 +107,7 @@ impl PositionedPostingList {
         Ok(self.1)
     }
 
-    fn current(&mut self) -> Result<Option<u64>> {
+    pub fn current(&mut self) -> Result<Option<u64>> {
         if self.1.is_none() {
             self.1 = self.next()?;
         }
@@ -136,18 +115,9 @@ impl PositionedPostingList {
     }
 }
 
-pub struct Merge(PositionedPostingList, PositionedPostingList);
+pub struct Merge(PostingList, PostingList);
 
-impl Merge {
-    pub fn new(a: Box<dyn PostingList>, b: Box<dyn PostingList>) -> Self {
-        Self(
-            PositionedPostingList(a, None),
-            PositionedPostingList(b, None),
-        )
-    }
-}
-
-impl PostingList for Merge {
+impl PostingListDecoder for Merge {
     fn next(&mut self) -> Result<Option<u64>> {
         let a = self.0.current()?;
         let b = self.1.current()?;
@@ -172,18 +142,9 @@ impl PostingList for Merge {
     }
 }
 
-pub struct Intersect(PositionedPostingList, PositionedPostingList);
+pub struct Intersect(PostingList, PostingList);
 
-impl Intersect {
-    pub fn new(a: Box<dyn PostingList>, b: Box<dyn PostingList>) -> Self {
-        Self(
-            PositionedPostingList(a, None),
-            PositionedPostingList(b, None),
-        )
-    }
-}
-
-impl PostingList for Intersect {
+impl PostingListDecoder for Intersect {
     fn next(&mut self) -> Result<Option<u64>> {
         if let Some(mut target) = self.0.next()? {
             loop {
@@ -204,18 +165,9 @@ impl PostingList for Intersect {
     }
 }
 
-pub struct Exclude(PositionedPostingList, PositionedPostingList);
+pub struct Exclude(PostingList, PostingList);
 
-impl Exclude {
-    pub fn new(a: Box<dyn PostingList>, b: Box<dyn PostingList>) -> Self {
-        Self(
-            PositionedPostingList(a, None),
-            PositionedPostingList(b, None),
-        )
-    }
-}
-
-impl PostingList for Exclude {
+impl PostingListDecoder for Exclude {
     fn next(&mut self) -> Result<Option<u64>> {
         while let Some(a) = self.0.next()? {
             if self.1.advance(a)? == Some(a) {
@@ -237,7 +189,7 @@ impl RangePostingList {
     }
 }
 
-impl PostingList for RangePostingList {
+impl PostingListDecoder for RangePostingList {
     fn next(&mut self) -> Result<Option<u64>> {
         Ok(self.0.next())
     }
@@ -292,7 +244,7 @@ mod tests {
         let a = RangePostingList(0..5);
         let b = RangePostingList(2..7);
 
-        let values = intersect(a, b).to_vec()?;
+        let values = Intersect(a.into(), b.into()).to_vec()?;
         assert_eq!(values, vec![2, 3, 4]);
         Ok(())
     }
@@ -302,7 +254,7 @@ mod tests {
         let a = RangePostingList(0..3);
         let b = RangePostingList(2..5);
 
-        let values = merge(a, b).to_vec()?;
+        let values = Merge(a.into(), b.into()).to_vec()?;
         assert_eq!(values, vec![0, 1, 2, 3, 4]);
         Ok(())
     }
@@ -312,7 +264,7 @@ mod tests {
         let a = RangePostingList(0..6);
         let b = RangePostingList(2..4);
 
-        let values = exclude(a, b).to_vec()?;
+        let values = Exclude(a.into(), b.into()).to_vec()?;
         assert_eq!(values, vec![0, 1, 4, 5]);
         Ok(())
     }

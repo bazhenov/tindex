@@ -22,18 +22,17 @@ enum Ast {
 ///
 /// Возвращает [PostingList] готовый к итерации. Индивидуальные термы по имени ищутся в переданном экземпляре [Index].
 #[context("Parsing query: {}", query)]
-pub fn parse_query(query: &str, index: &impl Index) -> Result<Box<dyn PostingList>> {
+pub fn parse_query(query: &str, index: &impl Index) -> Result<PostingList> {
     let tokens = QueryParser::parse(Rule::root, query)?;
-    let ast = parse_ast(tokens)?;
-    visit(ast, index)
+    visit(parse_ast(tokens)?, index)
 }
 
-fn visit(node: Ast, index: &impl Index) -> Result<Box<dyn PostingList>> {
-    let result: Box<dyn PostingList> = match node {
-        Ast::Ident(name) => Box::new(index.lookup(&name)?),
-        Ast::Exclude(lv, rv) => Box::new(Exclude::new(visit(*lv, index)?, visit(*rv, index)?)),
-        Ast::Merge(lv, rv) => Box::new(Merge::new(visit(*lv, index)?, visit(*rv, index)?)),
-        Ast::Intersect(lv, rv) => Box::new(Intersect::new(visit(*lv, index)?, visit(*rv, index)?)),
+fn visit(node: Ast, index: &impl Index) -> Result<PostingList> {
+    let result: PostingList = match node {
+        Ast::Ident(name) => index.lookup(&name)?.into(),
+        Ast::Exclude(lv, rv) => Exclude(visit(*lv, index)?, visit(*rv, index)?).into(),
+        Ast::Merge(lv, rv) => Merge(visit(*lv, index)?, visit(*rv, index)?).into(),
+        Ast::Intersect(lv, rv) => Intersect(visit(*lv, index)?, visit(*rv, index)?).into(),
     };
     Ok(result)
 }
