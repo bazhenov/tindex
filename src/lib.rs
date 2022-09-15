@@ -53,6 +53,19 @@ impl Index for DirectoryIndex {
 pub trait PostingListDecoder {
     fn next(&mut self) -> Result<Option<u64>>;
 
+    fn fill_buffer(&mut self, buffer: &mut [u64]) -> Result<usize> {
+        let mut capacity = 0;
+        for i in 0..buffer.len() {
+            if let Some(v) = self.next()? {
+                buffer[i] = v;
+                capacity += 1;
+            } else {
+                break;
+            }
+        }
+        Ok(capacity)
+    }
+
     fn to_vec(mut self) -> Result<Vec<u64>>
     where
         Self: Sized,
@@ -77,41 +90,70 @@ pub fn exclude(a: PostingList, b: PostingList) -> PostingList {
     Exclude(a, b).into()
 }
 
-pub struct PostingList(Box<dyn PostingListDecoder>, Option<u64>);
+pub struct PostingList {
+    decoder: Box<dyn PostingListDecoder>,
+    buf: [u64; 16],
+    pos: usize,
+    capacity: usize,
+}
 
 impl<T: PostingListDecoder + 'static> From<T> for PostingList {
     fn from(source: T) -> Self {
-        Self(Box::new(source), None)
+        Self {
+            decoder: Box::new(source),
+            buf: Default::default(),
+            pos: 0,
+            capacity: 0,
+        }
     }
 }
 
 impl PostingList {
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<u64>> {
-        self.1 = self.0.next()?;
-        Ok(self.1)
+        if self.pos >= self.capacity {
+            self.fill_buffer()?;
+        }
+        let pos = self.pos;
+        if pos >= self.capacity {
+            return Ok(None);
+        }
+
+        self.pos += 1;
+        Ok(Some(self.buf[pos]))
     }
 
     /// Возвращает первый элемент в потоке равный или больший чем переданный `target`
     pub fn advance(&mut self, target: u64) -> Result<Option<u64>> {
-        if let Some(c) = self.1 {
+        if let Some(c) = self.current()? {
             if c >= target {
                 return Ok(Some(c));
             }
         }
         while let Some(n) = self.next()? {
             if n >= target {
-                break;
+                return Ok(Some(n));
             }
         }
-        Ok(self.1)
+        Ok(None)
     }
 
     pub fn current(&mut self) -> Result<Option<u64>> {
-        if self.1.is_none() {
-            self.1 = self.next()?;
+        if self.pos >= self.capacity {
+            self.fill_buffer()?;
         }
-        Ok(self.1)
+        let pos = self.pos;
+        if pos >= self.capacity {
+            Ok(None)
+        } else {
+            Ok(Some(self.buf[pos]))
+        }
+    }
+
+    fn fill_buffer(&mut self) -> Result<()> {
+        self.capacity = self.decoder.fill_buffer(&mut self.buf)?;
+        self.pos = 0;
+        Ok(())
     }
 }
 
@@ -238,6 +280,26 @@ pub mod config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Into<Vec<u64>> for PostingList {
+        fn into(mut self) -> Vec<u64> {
+            let mut result = vec![];
+            while let Ok(Some(v)) = self.next() {
+                result.push(v);
+            }
+            result
+        }
+    }
+
+    #[test]
+    fn check_iterate() -> Result<()> {
+        let a = RangePostingList(0..4);
+        let list: PostingList = a.into();
+        let vec: Vec<u64> = list.into();
+
+        assert_eq!(vec, vec![0, 1, 2, 3]);
+        Ok(())
+    }
 
     #[test]
     fn check_intersect() -> Result<()> {
