@@ -66,6 +66,15 @@ pub trait PostingListDecoder {
         Ok(capacity)
     }
 
+    fn advance(&mut self, target: u64) -> Result<Option<u64>> {
+        while let Some(n) = self.next()? {
+            if n >= target {
+                return Ok(Some(n));
+            }
+        }
+        Ok(None)
+    }
+
     fn to_vec(mut self) -> Result<Vec<u64>>
     where
         Self: Sized,
@@ -130,12 +139,16 @@ impl PostingList {
                 return Ok(Some(c));
             }
         }
-        while let Some(n) = self.next()? {
-            if n >= target {
-                return Ok(Some(n));
+        if self.pos < self.capacity && self.buf[self.pos] < target {
+            while let Some(n) = self.next()? {
+                if n >= target {
+                    return Ok(Some(n));
+                }
             }
+            Ok(None)
+        } else {
+            self.decoder.advance(target)
         }
-        Ok(None)
     }
 
     pub fn current(&mut self) -> Result<Option<u64>> {
@@ -222,18 +235,45 @@ impl PostingListDecoder for Exclude {
 }
 
 #[derive(Clone)]
-pub struct RangePostingList(pub Range<u64>);
+pub struct RangePostingList {
+    start: u64,
+    end: u64,
+    pos: u64,
+}
 
 impl RangePostingList {
+    pub fn new(range: Range<u64>) -> Self {
+        Self {
+            start: range.start,
+            end: range.end,
+            pos: range.start,
+        }
+    }
+
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u64 {
-        self.0.end - self.0.start
+        self.end - self.start
     }
 }
 
 impl PostingListDecoder for RangePostingList {
     fn next(&mut self) -> Result<Option<u64>> {
-        Ok(self.0.next())
+        if self.pos >= self.end {
+            Ok(None)
+        } else {
+            let pos = self.pos;
+            self.pos += 1;
+            Ok(Some(pos))
+        }
+    }
+
+    fn advance(&mut self, target: u64) -> Result<Option<u64>> {
+        self.pos = target + 1;
+        if target < self.end {
+            Ok(Some(target))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -293,7 +333,7 @@ mod tests {
 
     #[test]
     fn check_iterate() -> Result<()> {
-        let a = RangePostingList(0..4);
+        let a = RangePostingList::new(0..4);
         let list: PostingList = a.into();
         let vec: Vec<u64> = list.into();
 
@@ -303,8 +343,8 @@ mod tests {
 
     #[test]
     fn check_intersect() -> Result<()> {
-        let a = RangePostingList(0..5);
-        let b = RangePostingList(2..7);
+        let a = RangePostingList::new(0..5);
+        let b = RangePostingList::new(2..7);
 
         let values = Intersect(a.into(), b.into()).to_vec()?;
         assert_eq!(values, vec![2, 3, 4]);
@@ -313,8 +353,8 @@ mod tests {
 
     #[test]
     fn check_merge() -> Result<()> {
-        let a = RangePostingList(0..3);
-        let b = RangePostingList(2..5);
+        let a = RangePostingList::new(0..3);
+        let b = RangePostingList::new(2..5);
 
         let values = Merge(a.into(), b.into()).to_vec()?;
         assert_eq!(values, vec![0, 1, 2, 3, 4]);
@@ -323,8 +363,8 @@ mod tests {
 
     #[test]
     fn check_exclude() -> Result<()> {
-        let a = RangePostingList(0..6);
-        let b = RangePostingList(2..4);
+        let a = RangePostingList::new(0..6);
+        let b = RangePostingList::new(2..4);
 
         let values = Exclude(a.into(), b.into()).to_vec()?;
         assert_eq!(values, vec![0, 1, 4, 5]);
