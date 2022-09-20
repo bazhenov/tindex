@@ -267,6 +267,41 @@ impl PostingListDecoder for RangePostingList {
         }
     }
 
+    fn fill_buffer(&mut self, buffer: &mut [u64]) -> Result<usize> {
+        let len = buffer.len();
+
+        let mut idx = 0;
+        while len > idx + 4 && self.end > self.pos + 4 {
+            buffer[idx] = self.pos;
+            idx += 1;
+            self.pos += 1;
+
+            buffer[idx] = self.pos;
+            idx += 1;
+            self.pos += 1;
+
+            buffer[idx] = self.pos;
+            idx += 1;
+            self.pos += 1;
+
+            buffer[idx] = self.pos;
+            idx += 1;
+            self.pos += 1;
+        }
+
+        for _ in idx..len {
+            if self.pos < self.end {
+                buffer[idx] = self.pos;
+                idx += 1;
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+
+        Ok(idx)
+    }
+
     fn advance(&mut self, target: u64) -> Result<Option<u64>> {
         self.pos = target + 1;
         if target < self.end {
