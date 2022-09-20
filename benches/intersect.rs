@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
-use tindex::{exclude, intersect, merge, PostingList, RangePostingList};
+use tindex::{exclude, intersect, merge, PostingList, PostingListDecoder, RangePostingList};
 
 pub fn posting_list_intersect(c: &mut Criterion) {
     let mut g = c.benchmark_group("Posting List Intersect");
@@ -88,6 +88,22 @@ pub fn posting_list_merge(c: &mut Criterion) {
     });
 }
 
+pub fn posting_list_iterate(c: &mut Criterion) {
+    let mut g = c.benchmark_group("iterate");
+    let a = RangePostingList::new(0..1000);
+    g.throughput(Throughput::Elements(1000));
+    g.bench_function("1K8", |bench| {
+        bench.iter_batched(
+            || a.clone(),
+            |mut a| {
+                let mut v: [u64; 8] = [0; 8];
+                while a.fill_buffer(&mut v).unwrap() > 0 {}
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
 #[inline]
 fn traverse(mut input: PostingList) {
     while input.next().unwrap().is_some() {}
@@ -97,6 +113,7 @@ criterion_group!(
     benches,
     posting_list_intersect,
     posting_list_merge,
-    posting_list_exclude
+    posting_list_exclude,
+    posting_list_iterate,
 );
 criterion_main!(benches);
