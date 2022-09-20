@@ -30,6 +30,3 @@ criterion = "0.3"
 [[bench]]
 harness = false
 name = "intersect"
-
-[profile.release]
-lto = true
