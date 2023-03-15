@@ -32,13 +32,24 @@ impl PlainTextDecoder {
 }
 
 impl PostingListDecoder for PlainTextDecoder {
-    fn next(&mut self) -> u64 {
-        let mut line = String::new();
-        let result = self.0.read_line(&mut line).unwrap();
-        if result == 0 {
-            return NO_DOC;
+    fn next_batch(&mut self, buffer: &mut crate::PlBuffer) -> usize {
+        fn next(decoder: &mut PlainTextDecoder) -> u64 {
+            let mut line = String::new();
+            let result = decoder.0.read_line(&mut line).unwrap();
+            if result == 0 {
+                return NO_DOC;
+            }
+            u64::from_str(line.trim_end()).unwrap()
         }
-        u64::from_str(line.trim_end()).unwrap()
+
+        for i in 0..buffer.len() {
+            let doc_id = next(self);
+            if doc_id == NO_DOC {
+                return i;
+            }
+            buffer[i] = doc_id;
+        }
+        return buffer.len();
     }
 }
 

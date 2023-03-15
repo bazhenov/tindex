@@ -54,30 +54,20 @@ impl Index for DirectoryIndex {
 }
 
 pub trait PostingListDecoder {
-    fn next(&mut self) -> u64;
-
-    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        for i in 0..buffer.len() {
-            let doc_id = self.next();
-            if doc_id == NO_DOC {
-                return i;
-            }
-            buffer[i] = doc_id;
-        }
-        return buffer.len();
-    }
+    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize;
 
     fn to_vec(mut self) -> Vec<u64>
     where
         Self: Sized,
     {
         let mut result = vec![];
+        let mut pl: PlBuffer = [0; 16];
         loop {
-            let doc_id = self.next();
-            if doc_id == NO_DOC {
+            let len = self.next_batch(&mut pl);
+            if len == 0 {
                 break;
             }
-            result.push(doc_id);
+            result.extend(&pl[0..len]);
         }
         result
     }
@@ -198,49 +188,67 @@ impl PostingListDecoder for Merge {
         }
         buffer.len()
     }
-
-    fn next(&mut self) -> u64 {
-        self.read_next()
-    }
 }
 
 pub struct Intersect(PostingList, PostingList);
 
 impl PostingListDecoder for Intersect {
-    fn next(&mut self) -> u64 {
-        let mut target = self.0.next();
-        if target == NO_DOC {
-            return NO_DOC;
+    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        fn next(intersect: &mut Intersect) -> u64 {
+            let mut target = intersect.0.next();
+            if target == NO_DOC {
+                return NO_DOC;
+            }
+            loop {
+                match intersect.1.advance(target) {
+                    NO_DOC => return NO_DOC,
+                    candidate if candidate == target => return target,
+                    candidate => target = candidate,
+                };
+                match intersect.0.advance(target) {
+                    NO_DOC => return NO_DOC,
+                    candidate if candidate == target => return target,
+                    candidate => target = candidate,
+                };
+            }
         }
-        loop {
-            match self.1.advance(target) {
-                NO_DOC => return NO_DOC,
-                candidate if candidate == target => return target,
-                candidate => target = candidate,
-            };
-            match self.0.advance(target) {
-                NO_DOC => return NO_DOC,
-                candidate if candidate == target => return target,
-                candidate => target = candidate,
-            };
+
+        for i in 0..buffer.len() {
+            let doc_id = next(self);
+            if doc_id == NO_DOC {
+                return i;
+            }
+            buffer[i] = doc_id;
         }
+        return buffer.len();
     }
 }
 
 pub struct Exclude(PostingList, PostingList);
 
 impl PostingListDecoder for Exclude {
-    fn next(&mut self) -> u64 {
-        loop {
-            let doc_id = self.0.next();
+    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        fn next(exclude: &mut Exclude) -> u64 {
+            loop {
+                let doc_id = exclude.0.next();
 
-            if doc_id == NO_DOC {
-                return NO_DOC;
-            }
-            if self.1.advance(doc_id) != doc_id {
-                return doc_id;
+                if doc_id == NO_DOC {
+                    return NO_DOC;
+                }
+                if exclude.1.advance(doc_id) != doc_id {
+                    return doc_id;
+                }
             }
         }
+
+        for i in 0..buffer.len() {
+            let doc_id = next(self);
+            if doc_id == NO_DOC {
+                return i;
+            }
+            buffer[i] = doc_id;
+        }
+        return buffer.len();
     }
 }
 
@@ -266,27 +274,7 @@ impl RangePostingList {
 }
 
 impl PostingListDecoder for RangePostingList {
-    fn next(&mut self) -> u64 {
-        if self.next >= self.range.end {
-            NO_DOC
-        } else {
-            let v = self.next;
-            self.next += 1;
-            v
-        }
-    }
-
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        // for i in 0..buffer.len() {
-        //     let doc_id = self.next();
-        //     if doc_id == NO_DOC {
-        //         return i;
-        //     } else {
-        //         buffer[i] = doc_id;
-        //     }
-        // }
-        // return buffer.len();
-
         let start = self.next;
         if start >= self.range.end {
             return 0;
