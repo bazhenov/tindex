@@ -34,6 +34,7 @@ pub mod prelude {
 }
 
 pub const NO_DOC: u64 = 0;
+type PlBuffer = [u64; 16];
 
 pub trait Index: Send + Sync {
     type Iterator: PostingListDecoder + 'static;
@@ -54,6 +55,17 @@ impl Index for DirectoryIndex {
 
 pub trait PostingListDecoder {
     fn next(&mut self) -> u64;
+
+    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        for i in 0..buffer.len() {
+            let doc_id = self.next();
+            if doc_id == NO_DOC {
+                return i;
+            }
+            buffer[i] = doc_id;
+        }
+        return buffer.len();
+    }
 
     fn to_vec(mut self) -> Vec<u64>
     where
@@ -83,54 +95,73 @@ pub fn exclude(a: PostingList, b: PostingList) -> PostingList {
     Exclude(a, b).into()
 }
 
-pub struct PostingList(Box<dyn PostingListDecoder>, Option<u64>);
+pub struct PostingList {
+    decoder: Box<dyn PostingListDecoder>,
+    buffer: PlBuffer,
+    capacity: usize,
+    position: usize,
+}
 
 impl<T: PostingListDecoder + 'static> From<T> for PostingList {
     fn from(source: T) -> Self {
-        Self(Box::new(source), None)
+        Self {
+            decoder: Box::new(source),
+            buffer: [0; 16],
+            capacity: 0,
+            position: 16,
+        }
     }
 }
 
 impl PostingList {
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u64 {
-        let doc_id = self.0.next();
-        self.1 = Some(doc_id);
-        doc_id
+        self.position += 1;
+        if !self.ensure_buffer_filled() {
+            return NO_DOC;
+        }
+        let value = self.buffer[self.position];
+        value
     }
 
     /// Возвращает первый элемент в потоке равный или больший чем переданный `target`
     pub fn advance(&mut self, target: u64) -> u64 {
-        if let Some(c) = self.1 {
-            if c >= target {
-                return c;
-            }
+        let current = self.current();
+        if current == NO_DOC || current >= target {
+            return current;
         }
         loop {
             let doc_id = self.next();
-            if doc_id == NO_DOC {
-                self.1 = None;
-                return NO_DOC;
-            }
-            if doc_id >= target {
-                self.1 = Some(doc_id);
+            if doc_id == NO_DOC || doc_id >= target {
                 return doc_id;
             }
         }
     }
 
     pub fn current(&mut self) -> u64 {
-        if self.1.is_none() {
-            self.1 = Some(self.next());
+        if !self.ensure_buffer_filled() {
+            return NO_DOC;
         }
-        self.1.unwrap()
+        self.buffer[self.position]
+    }
+
+    fn ensure_buffer_filled(&mut self) -> bool {
+        if self.position >= self.capacity {
+            let capacity = self.decoder.next_batch(&mut self.buffer);
+            if capacity == 0 {
+                return false;
+            }
+            self.position = 0;
+            self.capacity = capacity;
+        }
+        return true;
     }
 }
 
 pub struct Merge(PostingList, PostingList);
 
-impl PostingListDecoder for Merge {
-    fn next(&mut self) -> u64 {
+impl Merge {
+    fn read_next(&mut self) -> u64 {
         let a = self.0.current();
         let b = self.1.current();
         match (a, b) {
@@ -156,6 +187,23 @@ impl PostingListDecoder for Merge {
     }
 }
 
+impl PostingListDecoder for Merge {
+    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        for i in 0..buffer.len() {
+            let doc_id = self.read_next();
+            if doc_id == NO_DOC {
+                return i;
+            }
+            buffer[i] = doc_id;
+        }
+        buffer.len()
+    }
+
+    fn next(&mut self) -> u64 {
+        self.read_next()
+    }
+}
+
 pub struct Intersect(PostingList, PostingList);
 
 impl PostingListDecoder for Intersect {
@@ -165,8 +213,7 @@ impl PostingListDecoder for Intersect {
             return NO_DOC;
         }
         loop {
-            let advance = self.1.advance(target);
-            match advance {
+            match self.1.advance(target) {
                 NO_DOC => return NO_DOC,
                 candidate if candidate == target => return target,
                 candidate => target = candidate,
@@ -186,6 +233,7 @@ impl PostingListDecoder for Exclude {
     fn next(&mut self) -> u64 {
         loop {
             let doc_id = self.0.next();
+
             if doc_id == NO_DOC {
                 return NO_DOC;
             }
@@ -197,25 +245,58 @@ impl PostingListDecoder for Exclude {
 }
 
 #[derive(Clone)]
-pub struct RangePostingList(Range<u64>);
+pub struct RangePostingList {
+    range: Range<u64>,
+    next: u64,
+}
 
 impl RangePostingList {
     pub fn new(range: Range<u64>) -> Self {
         if range.start == NO_DOC {
             panic!("Start should be greater than zero");
         }
-        Self(range)
+        let next = range.start;
+        Self { range, next }
     }
 
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u64 {
-        self.0.end - self.0.start
+        self.range.end - self.range.start
     }
 }
 
 impl PostingListDecoder for RangePostingList {
     fn next(&mut self) -> u64 {
-        self.0.next().unwrap_or(NO_DOC)
+        if self.next >= self.range.end {
+            NO_DOC
+        } else {
+            let v = self.next;
+            self.next += 1;
+            v
+        }
+    }
+
+    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        // for i in 0..buffer.len() {
+        //     let doc_id = self.next();
+        //     if doc_id == NO_DOC {
+        //         return i;
+        //     } else {
+        //         buffer[i] = doc_id;
+        //     }
+        // }
+        // return buffer.len();
+
+        let start = self.next;
+        if start >= self.range.end {
+            return 0;
+        }
+        let len = buffer.len().min((self.range.end - start) as usize);
+        for i in 0..len {
+            buffer[i] = start + i as u64;
+        }
+        self.next += len as u64;
+        len
     }
 }
 
