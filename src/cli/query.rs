@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use clap::Parser;
 use std::path::PathBuf;
-use tindex::{query::parse_query, DirectoryIndex};
+use tindex::{query::parse_query, DirectoryIndex, NO_DOC};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Running query over index")]
@@ -18,8 +18,12 @@ pub async fn main(opts: Opts) -> Result<()> {
 
     let query = opts.query;
     let mut list = parse_query(&query, &index)?;
-    while let Some(id) = list.next()? {
-        println!("{}", id);
+    loop {
+        let doc_id = list.next();
+        if doc_id == NO_DOC {
+            break;
+        }
+        println!("{}", doc_id);
     }
     Ok(())
 }

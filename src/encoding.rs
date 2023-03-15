@@ -1,4 +1,4 @@
-use crate::{prelude::*, PostingListDecoder};
+use crate::{prelude::*, PostingListDecoder, NO_DOC};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -32,14 +32,13 @@ impl PlainTextDecoder {
 }
 
 impl PostingListDecoder for PlainTextDecoder {
-    fn next(&mut self) -> Result<Option<u64>> {
+    fn next(&mut self) -> u64 {
         let mut line = String::new();
-        let result = self.0.read_line(&mut line)?;
+        let result = self.0.read_line(&mut line).unwrap();
         if result == 0 {
-            return Ok(None);
+            return NO_DOC;
         }
-        let n = u64::from_str(line.trim_end())?;
-        Ok(Some(n))
+        u64::from_str(line.trim_end()).unwrap()
     }
 }
 
@@ -54,11 +53,11 @@ mod tests {
         let path = dir.path().join("plaintext.txt");
 
         let mut text = PlainTextEncoder(File::create(&path)?);
-        text.write_values(0..10)?;
+        text.write_values(1..10)?;
 
-        let result = PlainTextDecoder::open(&path)?.to_vec()?;
+        let result = PlainTextDecoder::open(&path)?.to_vec();
 
-        assert_eq!(result, (0..10).collect::<Vec<_>>());
+        assert_eq!(result, (1..10).collect::<Vec<_>>());
         Ok(())
     }
 }

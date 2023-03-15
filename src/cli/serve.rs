@@ -1,7 +1,7 @@
 use clap::Parser;
 use rocket::{get, http::Status, routes, State};
-use std::{cmp::Ordering, ops::Deref, path::PathBuf};
-use tindex::{prelude::*, query::parse_query, DirectoryIndex};
+use std::{ops::Deref, path::PathBuf};
+use tindex::{prelude::*, query::parse_query, DirectoryIndex, NO_DOC};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Run REST API HTTP-server for a given index")]
@@ -34,8 +34,12 @@ fn search(query: &str, index: &State<app::Index>) -> HttpResult<String> {
     let index = index.deref();
     let mut list = parse_query(query, index).map_err(|_| Status::BadRequest)?;
     let mut result = String::new();
-    while let Some(id) = list.next().map_err(|_| Status::InternalServerError)? {
-        result.push_str(&format!("{}\n", id));
+    loop {
+        let doc_id = list.next();
+        if doc_id == NO_DOC {
+            break;
+        }
+        result.push_str(&format!("{}\n", doc_id));
     }
     Ok(result)
 }
@@ -45,12 +49,9 @@ fn check(query: &str, id: u64, index: &State<app::Index>) -> HttpResult<&'static
     let index = index.deref();
     let mut list = parse_query(query, index).map_err(|_| Status::BadRequest)?;
 
-    while let Some(next) = list.next().map_err(|_| Status::InternalServerError)? {
-        match next.cmp(&id) {
-            Ordering::Less => continue,
-            Ordering::Equal => return Ok("true"),
-            Ordering::Greater => return Ok("false"),
-        }
+    if list.advance(id) == id {
+        Ok("true")
+    } else {
+        Ok("false")
     }
-    Ok("false")
 }

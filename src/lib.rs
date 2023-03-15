@@ -33,6 +33,8 @@ pub mod prelude {
     }
 }
 
+pub const NO_DOC: u64 = 0;
+
 pub trait Index: Send + Sync {
     type Iterator: PostingListDecoder + 'static;
 
@@ -51,17 +53,21 @@ impl Index for DirectoryIndex {
 }
 
 pub trait PostingListDecoder {
-    fn next(&mut self) -> Result<Option<u64>>;
+    fn next(&mut self) -> u64;
 
-    fn to_vec(mut self) -> Result<Vec<u64>>
+    fn to_vec(mut self) -> Vec<u64>
     where
         Self: Sized,
     {
         let mut result = vec![];
-        while let Some(item) = self.next()? {
-            result.push(item)
+        loop {
+            let doc_id = self.next();
+            if doc_id == NO_DOC {
+                break;
+            }
+            result.push(doc_id);
         }
-        Ok(result)
+        result
     }
 }
 
@@ -87,102 +93,120 @@ impl<T: PostingListDecoder + 'static> From<T> for PostingList {
 
 impl PostingList {
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Option<u64>> {
-        self.1 = self.0.next()?;
-        Ok(self.1)
+    pub fn next(&mut self) -> u64 {
+        let doc_id = self.0.next();
+        self.1 = Some(doc_id);
+        doc_id
     }
 
     /// Возвращает первый элемент в потоке равный или больший чем переданный `target`
-    pub fn advance(&mut self, target: u64) -> Result<Option<u64>> {
+    pub fn advance(&mut self, target: u64) -> u64 {
         if let Some(c) = self.1 {
             if c >= target {
-                return Ok(Some(c));
+                return c;
             }
         }
-        while let Some(n) = self.next()? {
-            if n >= target {
-                break;
+        loop {
+            let doc_id = self.next();
+            if doc_id == NO_DOC {
+                self.1 = None;
+                return NO_DOC;
+            }
+            if doc_id >= target {
+                self.1 = Some(doc_id);
+                return doc_id;
             }
         }
-        Ok(self.1)
     }
 
-    pub fn current(&mut self) -> Result<Option<u64>> {
+    pub fn current(&mut self) -> u64 {
         if self.1.is_none() {
-            self.1 = self.next()?;
+            self.1 = Some(self.next());
         }
-        Ok(self.1)
+        self.1.unwrap()
     }
 }
 
 pub struct Merge(PostingList, PostingList);
 
 impl PostingListDecoder for Merge {
-    fn next(&mut self) -> Result<Option<u64>> {
-        let a = self.0.current()?;
-        let b = self.1.current()?;
-        if let Some((a, b)) = a.zip(b) {
-            if a <= b {
-                self.0.next()?;
+    fn next(&mut self) -> u64 {
+        let a = self.0.current();
+        let b = self.1.current();
+        match (a, b) {
+            (NO_DOC, NO_DOC) => NO_DOC,
+            (a, NO_DOC) => {
+                self.0.next();
+                a
             }
-            if b <= a {
-                self.1.next()?;
+            (NO_DOC, b) => {
+                self.1.next();
+                b
             }
-            return Ok(Some(a.min(b)));
+            (a, b) => {
+                if a <= b {
+                    self.0.next();
+                }
+                if b <= a {
+                    self.1.next();
+                }
+                a.min(b)
+            }
         }
-        if let Some(a) = self.0.current()? {
-            self.0.next()?;
-            return Ok(Some(a));
-        }
-        if let Some(b) = self.1.current()? {
-            self.1.next()?;
-            return Ok(Some(b));
-        }
-        Ok(None)
     }
 }
 
 pub struct Intersect(PostingList, PostingList);
 
 impl PostingListDecoder for Intersect {
-    fn next(&mut self) -> Result<Option<u64>> {
-        if let Some(mut target) = self.0.next()? {
-            loop {
-                match self.1.advance(target)? {
-                    Some(v) if v == target => return Ok(Some(target)),
-                    Some(v) => target = v,
-                    None => return Ok(None),
-                }
-
-                match self.0.advance(target)? {
-                    Some(v) if v == target => return Ok(Some(target)),
-                    Some(v) => target = v,
-                    None => return Ok(None),
-                }
-            }
+    fn next(&mut self) -> u64 {
+        let mut target = self.0.next();
+        if target == NO_DOC {
+            return NO_DOC;
         }
-        Ok(None)
+        loop {
+            let advance = self.1.advance(target);
+            match advance {
+                NO_DOC => return NO_DOC,
+                candidate if candidate == target => return target,
+                candidate => target = candidate,
+            };
+            match self.0.advance(target) {
+                NO_DOC => return NO_DOC,
+                candidate if candidate == target => return target,
+                candidate => target = candidate,
+            };
+        }
     }
 }
 
 pub struct Exclude(PostingList, PostingList);
 
 impl PostingListDecoder for Exclude {
-    fn next(&mut self) -> Result<Option<u64>> {
-        while let Some(a) = self.0.next()? {
-            if self.1.advance(a)? == Some(a) {
-                continue;
+    fn next(&mut self) -> u64 {
+        loop {
+            let doc_id = self.0.next();
+            if doc_id == NO_DOC {
+                return NO_DOC;
             }
-            return Ok(Some(a));
+            if self.1.advance(doc_id) != doc_id {
+                return doc_id;
+            }
         }
-        Ok(None)
     }
 }
 
 #[derive(Clone)]
-pub struct RangePostingList(pub Range<u64>);
+pub struct RangePostingList(Range<u64>);
 
 impl RangePostingList {
+    pub fn new(range: Range<u64>) -> Self {
+        if range.start == NO_DOC {
+            panic!("Start should be greater than zero");
+        }
+        Self(range)
+    }
+
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u64 {
         self.0.end - self.0.start
@@ -190,8 +214,8 @@ impl RangePostingList {
 }
 
 impl PostingListDecoder for RangePostingList {
-    fn next(&mut self) -> Result<Option<u64>> {
-        Ok(self.0.next())
+    fn next(&mut self) -> u64 {
+        self.0.next().unwrap_or(NO_DOC)
     }
 }
 
@@ -241,31 +265,31 @@ mod tests {
 
     #[test]
     fn check_intersect() -> Result<()> {
-        let a = RangePostingList(0..5);
-        let b = RangePostingList(2..7);
+        let a = RangePostingList::new(1..5);
+        let b = RangePostingList::new(2..7);
 
-        let values = Intersect(a.into(), b.into()).to_vec()?;
+        let values = Intersect(a.into(), b.into()).to_vec();
         assert_eq!(values, vec![2, 3, 4]);
         Ok(())
     }
 
     #[test]
     fn check_merge() -> Result<()> {
-        let a = RangePostingList(0..3);
-        let b = RangePostingList(2..5);
+        let a = RangePostingList::new(1..3);
+        let b = RangePostingList::new(2..5);
 
-        let values = Merge(a.into(), b.into()).to_vec()?;
-        assert_eq!(values, vec![0, 1, 2, 3, 4]);
+        let values = Merge(a.into(), b.into()).to_vec();
+        assert_eq!(values, vec![1, 2, 3, 4]);
         Ok(())
     }
 
     #[test]
     fn check_exclude() -> Result<()> {
-        let a = RangePostingList(0..6);
-        let b = RangePostingList(2..4);
+        let a = RangePostingList::new(1..6);
+        let b = RangePostingList::new(2..4);
 
-        let values = Exclude(a.into(), b.into()).to_vec()?;
-        assert_eq!(values, vec![0, 1, 4, 5]);
+        let values = Exclude(a.into(), b.into()).to_vec();
+        assert_eq!(values, vec![1, 4, 5]);
         Ok(())
     }
 }
