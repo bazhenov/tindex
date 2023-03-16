@@ -54,6 +54,20 @@ impl Index for DirectoryIndex {
 }
 
 pub trait PostingListDecoder {
+    fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        let mut len = self.next_batch(buffer);
+        if len == 0 {
+            return 0;
+        }
+        while buffer[len - 1] < target {
+            len = self.next_batch(buffer);
+            if len == 0 {
+                return 0;
+            }
+        }
+        return len;
+    }
+
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize;
 
     fn to_vec(mut self) -> Vec<u64>
@@ -116,6 +130,16 @@ impl PostingList {
     /// Возвращает первый элемент в потоке равный или больший чем переданный `target`
     pub fn advance(&mut self, target: u64) -> u64 {
         let mut current = self.current();
+        if current == NO_DOC || current >= target {
+            return current;
+        }
+        if self.buffer[self.len - 1] < target {
+            // advancing to the target using decoder advance
+            self.len = self.decoder.next_batch_advance(target, &mut self.buffer);
+            self.position = 0;
+            current = self.current();
+        }
+        // element already in current buffer
         while current != NO_DOC && current < target {
             current = self.next();
         }
@@ -339,5 +363,20 @@ mod tests {
         let values = Exclude(a.into(), b.into()).to_vec();
         assert_eq!(999, values.len());
         Ok(())
+    }
+
+    #[test]
+    fn range_posting_list_next_advance() {
+        let mut t = RangePostingList::new(1..1000);
+        let mut buffer = [0; 3];
+
+        assert_eq!(t.next_batch(&mut buffer), 3);
+        assert_eq!(buffer, [1, 2, 3]);
+
+        assert_eq!(t.next_batch_advance(10, &mut buffer), 3);
+        assert_eq!(buffer, [10, 11, 12]);
+
+        assert_eq!(t.next_batch_advance(998, &mut buffer), 3);
+        assert_eq!(buffer, [997, 998, 999]);
     }
 }
