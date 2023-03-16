@@ -1,10 +1,11 @@
-mod cli;
-
 use clap::Parser;
 use dotenv::dotenv;
-use tindex_core::prelude::*;
+use prelude::*;
+use std::path::PathBuf;
+use tindex_core::{encoding::PlainTextDecoder, PostingListDecoder};
 extern crate rocket;
 
+mod cli;
 pub mod clickhouse;
 pub mod mysql;
 pub mod query;
@@ -68,6 +69,23 @@ pub mod config {
 
         fn name(&self) -> &str;
         fn execute(&mut self, query: &Self::Query) -> Result<Vec<u64>>;
+    }
+}
+
+pub trait Index: Send + Sync {
+    type Iterator: PostingListDecoder + 'static;
+
+    fn lookup(&self, name: &str) -> Result<Self::Iterator>;
+}
+
+pub struct DirectoryIndex(pub PathBuf);
+
+impl Index for DirectoryIndex {
+    type Iterator = PlainTextDecoder;
+
+    fn lookup(&self, name: &str) -> Result<Self::Iterator> {
+        let path = self.0.join(format!("{}.idx", name));
+        PlainTextDecoder::open(&path).context(OpeningIndexFile(path))
     }
 }
 

@@ -1,4 +1,7 @@
-use crate::config::{Config, Connection, Database, Query};
+use crate::{
+    config::{Config, Connection, Database, Query},
+    prelude::*,
+};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use fn_error_context::context;
@@ -9,10 +12,7 @@ use std::{
     thread::{self, sleep, JoinHandle},
     time::Duration,
 };
-use tindex_core::{
-    encoding::{Encoder, PlainTextEncoder},
-    prelude::*,
-};
+use tindex_core::encoding::{Encoder, PlainTextEncoder};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Run indexation for all queries in a config")]
@@ -153,7 +153,7 @@ fn run_query<C: Connection>(db: &mut C, query: &C::Query, path: &Path) -> Result
     let mut ids = db.execute(query)?;
     let size = ids.len();
     ids.sort_unstable();
-    let file = File::create(&path)?;
+    let file = File::create(path)?;
     write(ids, PlainTextEncoder(file))?;
     info!(
         "Query finished (name: {}, records: {})...",

@@ -1,50 +1,14 @@
-use encoding::PlainTextDecoder;
-use prelude::*;
-use std::{ops::Range, path::PathBuf};
+use std::ops::Range;
 
 pub mod encoding;
 
-pub mod prelude {
-    use std::path::PathBuf;
-    use thiserror::Error;
-
+mod prelude {
     pub type Result<T> = anyhow::Result<T>;
     pub type IoResult<T> = std::io::Result<T>;
-
-    pub use anyhow::Context;
-    pub use Error::*;
-
-    pub use log::{debug, error, info, log, trace, warn};
-
-    #[derive(Error, Debug)]
-    pub enum Error {
-        #[error("Opening index file: {0}")]
-        OpeningIndexFile(PathBuf),
-
-        #[error("Query worker panic")]
-        QueryWorkerPanic,
-    }
 }
 
 pub const NO_DOC: u64 = u64::MAX;
 type PlBuffer = [u64];
-
-pub trait Index: Send + Sync {
-    type Iterator: PostingListDecoder + 'static;
-
-    fn lookup(&self, name: &str) -> Result<Self::Iterator>;
-}
-
-pub struct DirectoryIndex(pub PathBuf);
-
-impl Index for DirectoryIndex {
-    type Iterator = PlainTextDecoder;
-
-    fn lookup(&self, name: &str) -> Result<Self::Iterator> {
-        let path = self.0.join(format!("{}.idx", name));
-        PlainTextDecoder::open(&path).context(OpeningIndexFile(path))
-    }
-}
 
 pub trait PostingListDecoder {
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
@@ -58,7 +22,7 @@ pub trait PostingListDecoder {
                 return 0;
             }
         }
-        return len;
+        len
     }
 
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize;
@@ -155,7 +119,7 @@ impl PostingList {
         }
         self.len = self.decoder.next_batch(&mut self.buffer);
         self.position = 0;
-        return self.len > 0;
+        self.len > 0
     }
 }
 
@@ -309,8 +273,8 @@ impl PostingListDecoder for RangePostingList {
             return 0;
         }
         let len = buffer.len().min((self.range.end - start) as usize);
-        for i in 0..len {
-            buffer[i] = start + i as u64;
+        for (i, item) in buffer[..len].iter_mut().enumerate() {
+            *item = start + i as u64;
         }
         self.next += len as u64;
         len
@@ -328,43 +292,39 @@ mod tests {
     use std::panic::RefUnwindSafe;
 
     #[test]
-    fn check_intersect() -> Result<()> {
+    fn check_intersect() {
         let a = RangePostingList::new(1..5);
         let b = RangePostingList::new(2..7);
 
         let values = Intersect(a.into(), b.into()).to_vec();
         assert_eq!(values, vec![2, 3, 4]);
-        Ok(())
     }
 
     #[test]
-    fn check_merge() -> Result<()> {
+    fn check_merge() {
         let a = RangePostingList::new(1..3);
         let b = RangePostingList::new(2..5);
 
         let values = Merge(a.into(), b.into()).to_vec();
         assert_eq!(values, vec![1, 2, 3, 4]);
-        Ok(())
     }
 
     #[test]
-    fn check_exclude() -> Result<()> {
+    fn check_exclude() {
         let a = RangePostingList::new(1..6);
         let b = RangePostingList::new(2..4);
 
         let values = Exclude(a.into(), b.into()).to_vec();
         assert_eq!(values, vec![1, 4, 5]);
-        Ok(())
     }
 
     #[test]
-    fn check_no_exclude() -> Result<()> {
+    fn check_no_exclude() {
         let a = RangePostingList::new(1..1_000);
         let b = RangePostingList::new(1_000..2_000);
 
         let values = Exclude(a.into(), b.into()).to_vec();
         assert_eq!(999, values.len());
-        Ok(())
     }
 
     #[test]

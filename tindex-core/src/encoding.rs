@@ -1,4 +1,4 @@
-use crate::{prelude::*, PostingListDecoder, NO_DOC};
+use crate::{prelude::*, PostingListDecoder};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -33,23 +33,17 @@ impl PlainTextDecoder {
 
 impl PostingListDecoder for PlainTextDecoder {
     fn next_batch(&mut self, buffer: &mut crate::PlBuffer) -> usize {
-        fn next(decoder: &mut PlainTextDecoder) -> u64 {
-            let mut line = String::new();
-            let result = decoder.0.read_line(&mut line).unwrap();
+        let mut line = String::new();
+        for (i, item) in buffer.iter_mut().enumerate() {
+            line.clear();
+            let result = self.0.read_line(&mut line).unwrap();
             if result == 0 {
-                return NO_DOC;
-            }
-            u64::from_str(line.trim_end()).unwrap()
-        }
-
-        for i in 0..buffer.len() {
-            let doc_id = next(self);
-            if doc_id == NO_DOC {
                 return i;
+            } else {
+                *item = u64::from_str(line.trim_end()).unwrap()
             }
-            buffer[i] = doc_id;
         }
-        return buffer.len();
+        buffer.len()
     }
 }
 

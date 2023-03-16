@@ -1,12 +1,12 @@
 //! Токенизация и парсинг запросов
 //!
 //! Для токенизации используется библиотека [PEST](https://github.com/pest-parser/pest).
-use crate::prelude::*;
+use crate::{prelude::*, Index};
 use anyhow::bail;
 use fn_error_context::context;
 use pest::{iterators::Pairs, Parser};
 use pest_derive::Parser;
-use tindex_core::{Exclude, Index, Intersect, Merge, PostingList};
+use tindex_core::{Exclude, Intersect, Merge, PostingList};
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
