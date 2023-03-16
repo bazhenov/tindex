@@ -2823,25 +2823,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "tindex-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "criterion",
- "log",
- "rand",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "tindex-web"
+name = "tindex"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
  "clickhouse",
+ "criterion",
  "cron",
  "dotenv",
  "env_logger",
@@ -2851,11 +2840,12 @@ dependencies = [
  "mysql",
  "pest",
  "pest_derive",
+ "rand",
  "rocket",
  "serde",
  "serde_yaml",
+ "tempfile",
  "thiserror",
- "tindex-core",
  "tokio",
 ]
 

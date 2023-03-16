@@ -1,3 +1,4 @@
+use crate::config::{Config, Connection, Database, Query};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use fn_error_context::context;
@@ -8,8 +9,7 @@ use std::{
     thread::{self, sleep, JoinHandle},
     time::Duration,
 };
-use tindex::{
-    config::{Config, Connection, Database, Query},
+use tindex_core::{
     encoding::{Encoder, PlainTextEncoder},
     prelude::*,
 };

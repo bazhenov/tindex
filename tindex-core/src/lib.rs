@@ -1,15 +1,8 @@
-extern crate pest;
-#[macro_use]
-extern crate pest_derive;
-
 use encoding::PlainTextDecoder;
 use prelude::*;
 use std::{ops::Range, path::PathBuf};
 
-pub mod clickhouse;
 pub mod encoding;
-pub mod mysql;
-pub mod query;
 
 pub mod prelude {
     use std::path::PathBuf;
@@ -166,7 +159,7 @@ impl PostingList {
     }
 }
 
-pub struct Merge(PostingList, PostingList);
+pub struct Merge(pub PostingList, pub PostingList);
 
 impl PostingListDecoder for Merge {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
@@ -195,7 +188,7 @@ impl PostingListDecoder for Merge {
     }
 }
 
-pub struct Intersect(PostingList, PostingList);
+pub struct Intersect(pub PostingList, pub PostingList);
 
 impl PostingListDecoder for Intersect {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
@@ -223,7 +216,7 @@ impl PostingListDecoder for Intersect {
     }
 }
 
-pub struct Exclude(PostingList, PostingList);
+pub struct Exclude(pub PostingList, pub PostingList);
 
 impl PostingListDecoder for Exclude {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
@@ -321,46 +314,6 @@ impl PostingListDecoder for RangePostingList {
         }
         self.next += len as u64;
         len
-    }
-}
-
-pub mod config {
-    use super::*;
-    use cron::Schedule;
-    use serde::{de::Error, Deserialize, Deserializer};
-    use std::str::FromStr;
-
-    #[derive(Deserialize, PartialEq, Eq, Debug)]
-    pub struct Config {
-        pub mysql: Option<Vec<mysql::MySqlDatabase>>,
-        pub clickhouse: Option<Vec<clickhouse::ClickhouseDatabase>>,
-    }
-
-    pub fn schedule_from_string<'de, D>(deserializer: D) -> std::result::Result<Schedule, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s: String = Deserialize::deserialize(deserializer)?;
-        Schedule::from_str(&s).map_err(D::Error::custom)
-    }
-
-    pub trait Database {
-        type Connection: Connection;
-
-        fn connect(&self) -> Result<Self::Connection>;
-        fn list_queries(&self) -> &[<Self::Connection as Connection>::Query];
-    }
-
-    pub trait Query: Clone {
-        fn name(&self) -> &str;
-        fn schedule(&self) -> &cron::Schedule;
-    }
-
-    pub trait Connection {
-        type Query: Query;
-
-        fn name(&self) -> &str;
-        fn execute(&mut self, query: &Self::Query) -> Result<Vec<u64>>;
     }
 }
 

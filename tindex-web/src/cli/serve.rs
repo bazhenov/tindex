@@ -1,7 +1,8 @@
+use crate::{prelude::*, query::parse_query};
 use clap::Parser;
 use rocket::{get, http::Status, routes, State};
 use std::{ops::Deref, path::PathBuf};
-use tindex::{prelude::*, query::parse_query, DirectoryIndex, NO_DOC};
+use tindex_core::{DirectoryIndex, NO_DOC};
 
 #[derive(Parser, Debug)]
 #[clap(about = "Run REST API HTTP-server for a given index")]

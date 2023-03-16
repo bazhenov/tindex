@@ -1,33 +1,6 @@
-[package]
-edition = "2021"
-name = "tindex"
-version = "0.1.0"
+[workspace]
 
-[dependencies]
-anyhow = "1.0"
-chrono = "0.4.19"
-clap = {version = "3.2", features = ["derive"]}
-clickhouse = "0.10.0"
-cron = "0.11.0"
-dotenv = "0.15"
-env_logger = "0.9.0"
-fn-error-context = "0.2.0"
-futures = "0.3"
-log = "0.4.17"
-mysql = "23.0"
-pest = "2.1"
-pest_derive = "2.1"
-rand = "0.8.5"
-rocket = "0.5.0-rc.2"
-serde = {version = "1.0", features = ["derive"]}
-serde_yaml = "0.8"
-tempfile = "3.3"
-thiserror = "1.0"
-tokio = {version = "1", features = ["full"]}
-
-[dev-dependencies]
-criterion = "0.4"
-
-[[bench]]
-harness = false
-name = "intersect"
+members = [
+    "tindex-core",
+    "tindex-web"
+]

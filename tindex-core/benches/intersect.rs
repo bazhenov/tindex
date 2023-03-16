@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
-use tindex::{exclude, intersect, merge, PostingList, RangePostingList, NO_DOC};
+use tindex_core::{exclude, intersect, merge, PostingList, RangePostingList, NO_DOC};
 
 pub fn posting_list_intersect(c: &mut Criterion) {
     let mut g = c.benchmark_group("Posting List Intersect");
