@@ -248,6 +248,41 @@ impl PostingListDecoder for Exclude {
     }
 }
 
+#[derive(Debug)]
+pub struct VecPostingList {
+    data: Vec<u64>,
+    pos: usize,
+}
+
+impl VecPostingList {
+    pub fn new(input: &[u64]) -> Self {
+        assert!(!input.is_empty(), "Posting list should not be empty");
+        assert!(input[0] > 0, "First element should be positive");
+        let mut list = Vec::with_capacity(input.len());
+        let mut previous = input[0];
+        list.push(input[0]);
+        for item in &input[1..] {
+            assert!(*item > previous, "Items should be increasing");
+            list.push(*item);
+            previous = *item;
+        }
+        Self { data: list, pos: 0 }
+    }
+}
+
+impl PostingListDecoder for VecPostingList {
+    fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        if self.pos >= self.data.len() {
+            return 0;
+        }
+        let len = buffer.len().min(self.data.len() - self.pos);
+        let src = &self.data[self.pos..self.pos + len];
+        buffer[0..len].copy_from_slice(src);
+        self.pos += len;
+        len
+    }
+}
+
 #[derive(Clone)]
 pub struct RangePostingList {
     range: Range<u64>,
@@ -332,6 +367,12 @@ pub mod config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::prelude::*;
+    use rand::Fill;
+    use rand::SeedableRng;
+    use std::fmt::Debug;
+    use std::panic;
+    use std::panic::RefUnwindSafe;
 
     #[test]
     fn check_intersect() -> Result<()> {
@@ -374,6 +415,51 @@ mod tests {
     }
 
     #[test]
+    fn check_merge_massive() {
+        run_seeded_test::<StdRng>(None, |mut rng| {
+            for _ in 0..100 {
+                let a = random_posting_list(&mut rng);
+                let b = random_posting_list(&mut rng);
+
+                let expected = naive_merge(&a.data, &b.data);
+                let actual = Merge(a.into(), b.into()).to_vec();
+
+                assert_eq!(actual, expected);
+            }
+        });
+    }
+
+    #[test]
+    fn check_intersect_massive() {
+        run_seeded_test::<StdRng>(None, |mut rng| {
+            for _ in 0..100 {
+                let a = random_posting_list(&mut rng);
+                let b = random_posting_list(&mut rng);
+
+                let expected = naive_intersect(&a.data, &b.data);
+                let actual = Intersect(a.into(), b.into()).to_vec();
+
+                assert_eq!(actual, expected);
+            }
+        });
+    }
+
+    #[test]
+    fn check_exclude_massive() {
+        run_seeded_test::<StdRng>(None, |mut rng| {
+            for _ in 0..100 {
+                let a = random_posting_list(&mut rng);
+                let b = random_posting_list(&mut rng);
+
+                let expected = naive_exclude(&a.data, &b.data);
+                let actual = Exclude(a.into(), b.into()).to_vec();
+
+                assert_eq!(actual, expected);
+            }
+        });
+    }
+
+    #[test]
     fn range_posting_list_next_advance() {
         let mut t = RangePostingList::new(1..1000);
         let mut buffer = [0; 3];
@@ -386,5 +472,64 @@ mod tests {
 
         assert_eq!(t.next_batch_advance(998, &mut buffer), 2);
         assert_eq!(buffer[..2], [998, 999]);
+    }
+
+    fn naive_merge(a: &[u64], b: &[u64]) -> Vec<u64> {
+        let mut union = a
+            .iter()
+            .cloned()
+            .chain(b.iter().cloned())
+            .collect::<Vec<_>>();
+        union.sort();
+        union.dedup();
+        union
+    }
+
+    fn naive_intersect(a: &[u64], b: &[u64]) -> Vec<u64> {
+        a.iter()
+            .filter(|i| b.binary_search(i).is_ok())
+            .cloned()
+            .collect()
+    }
+
+    fn naive_exclude(a: &[u64], b: &[u64]) -> Vec<u64> {
+        a.iter()
+            .filter(|i| b.binary_search(i).is_err())
+            .cloned()
+            .collect()
+    }
+
+    fn run_seeded_test<R: SeedableRng + Rng>(seed: Option<R::Seed>, f: fn(R) -> ())
+    where
+        R::Seed: Fill + Debug + Copy + RefUnwindSafe,
+    {
+        let seed = seed.unwrap_or_else(|| {
+            let mut seed = Default::default();
+            thread_rng().fill(&mut seed);
+            seed
+        });
+
+        let result = panic::catch_unwind(|| {
+            f(R::from_seed(seed));
+        });
+
+        if result.is_err() {
+            panic!(
+                "Test are failed. Check following seed:\n\n  ==> seed: {:?}\n\n",
+                seed
+            );
+        }
+    }
+
+    fn random_posting_list(rng: &mut impl Rng) -> VecPostingList {
+        let size: usize = rng.gen_range(1..20);
+        let mut list = Vec::with_capacity(size);
+
+        let mut doc_id = 0;
+        for _ in 0..size {
+            doc_id += rng.gen_range(1..1000);
+            list.push(doc_id)
+        }
+        VecPostingList::new(&list)
     }
 }

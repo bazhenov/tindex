@@ -17,6 +17,7 @@ log = "0.4.17"
 mysql = "23.0"
 pest = "2.1"
 pest_derive = "2.1"
+rand = "0.8.5"
 rocket = "0.5.0-rc.2"
 serde = {version = "1.0", features = ["derive"]}
 serde_yaml = "0.8"
