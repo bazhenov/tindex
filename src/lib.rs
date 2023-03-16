@@ -150,37 +150,35 @@ impl PostingList {
 
 pub struct Merge(PostingList, PostingList);
 
-impl Merge {
-    fn read_next(&mut self) -> u64 {
-        let a = self.0.current();
-        let b = self.1.current();
-        match (a, b) {
-            (NO_DOC, NO_DOC) => NO_DOC,
-            (a, NO_DOC) => {
-                self.0.next();
-                a
-            }
-            (NO_DOC, b) => {
-                self.1.next();
-                b
-            }
-            (a, b) => {
-                if a <= b {
-                    self.0.next();
-                }
-                if b <= a {
-                    self.1.next();
-                }
-                a.min(b)
-            }
-        }
-    }
-}
-
 impl PostingListDecoder for Merge {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        fn read_next(merge: &mut Merge) -> u64 {
+            let a = merge.0.current();
+            let b = merge.1.current();
+            match (a, b) {
+                (NO_DOC, NO_DOC) => NO_DOC,
+                (a, NO_DOC) => {
+                    merge.0.next();
+                    a
+                }
+                (NO_DOC, b) => {
+                    merge.1.next();
+                    b
+                }
+                (a, b) => {
+                    if a <= b {
+                        merge.0.next();
+                    }
+                    if b <= a {
+                        merge.1.next();
+                    }
+                    a.min(b)
+                }
+            }
+        }
+
         for i in 0..buffer.len() {
-            let doc_id = self.read_next();
+            let doc_id = read_next(self);
             if doc_id == NO_DOC {
                 return i;
             }
