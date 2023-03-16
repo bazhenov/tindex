@@ -115,16 +115,11 @@ impl PostingList {
 
     /// Возвращает первый элемент в потоке равный или больший чем переданный `target`
     pub fn advance(&mut self, target: u64) -> u64 {
-        let current = self.current();
-        if current == NO_DOC || current >= target {
-            return current;
+        let mut current = self.current();
+        while current != NO_DOC && current < target {
+            current = self.next();
         }
-        loop {
-            let doc_id = self.next();
-            if doc_id == NO_DOC || doc_id >= target {
-                return doc_id;
-            }
-        }
+        current
     }
 
     pub fn current(&mut self) -> u64 {
@@ -205,27 +200,24 @@ pub struct Exclude(PostingList, PostingList);
 
 impl PostingListDecoder for Exclude {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        fn next(exclude: &mut Exclude) -> u64 {
-            loop {
-                let doc_id = exclude.0.next();
-
-                if doc_id == NO_DOC {
-                    return NO_DOC;
-                }
-                if exclude.1.advance(doc_id) != doc_id {
-                    return doc_id;
-                }
+        let mut a = self.0.current();
+        let mut b = self.1.current();
+        let mut i = 0;
+        while i < buffer.len() && a != NO_DOC {
+            while (a < b || b == NO_DOC) && i < buffer.len() && a != NO_DOC {
+                buffer[i] = a;
+                i += 1;
+                a = self.0.next();
+            }
+            if b < a {
+                b = self.1.advance(a);
+            }
+            while a == b && a != NO_DOC && b != NO_DOC {
+                a = self.0.next();
+                b = self.1.next();
             }
         }
-
-        for i in 0..buffer.len() {
-            let doc_id = next(self);
-            if doc_id == NO_DOC {
-                return i;
-            }
-            buffer[i] = doc_id;
-        }
-        return buffer.len();
+        i
     }
 }
 
@@ -336,6 +328,16 @@ mod tests {
 
         let values = Exclude(a.into(), b.into()).to_vec();
         assert_eq!(values, vec![1, 4, 5]);
+        Ok(())
+    }
+
+    #[test]
+    fn check_no_exclude() -> Result<()> {
+        let a = RangePostingList::new(1..1_000);
+        let b = RangePostingList::new(1_000..2_000);
+
+        let values = Exclude(a.into(), b.into()).to_vec();
+        assert_eq!(999, values.len());
         Ok(())
     }
 }
