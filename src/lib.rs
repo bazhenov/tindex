@@ -33,8 +33,8 @@ pub mod prelude {
     }
 }
 
-pub const NO_DOC: u64 = 0;
-type PlBuffer = [u64; 16];
+pub const NO_DOC: u64 = u64::MAX;
+type PlBuffer = [u64];
 
 pub trait Index: Send + Sync {
     type Iterator: PostingListDecoder + 'static;
@@ -61,7 +61,7 @@ pub trait PostingListDecoder {
         Self: Sized,
     {
         let mut result = vec![];
-        let mut pl: PlBuffer = [0; 16];
+        let mut pl = [0; 16];
         loop {
             let len = self.next_batch(&mut pl);
             if len == 0 {
@@ -87,8 +87,8 @@ pub fn exclude(a: PostingList, b: PostingList) -> PostingList {
 
 pub struct PostingList {
     decoder: Box<dyn PostingListDecoder>,
-    buffer: PlBuffer,
-    capacity: usize,
+    buffer: [u64; 16],
+    len: usize,
     position: usize,
 }
 
@@ -97,8 +97,8 @@ impl<T: PostingListDecoder + 'static> From<T> for PostingList {
         Self {
             decoder: Box::new(source),
             buffer: [0; 16],
-            capacity: 0,
-            position: 16,
+            len: 0,
+            position: 0,
         }
     }
 }
@@ -107,11 +107,10 @@ impl PostingList {
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u64 {
         self.position += 1;
-        if !self.ensure_buffer_filled() {
+        if !self.ensure_buffer_has_data() {
             return NO_DOC;
         }
-        let value = self.buffer[self.position];
-        value
+        self.buffer[self.position]
     }
 
     /// Возвращает первый элемент в потоке равный или больший чем переданный `target`
@@ -129,22 +128,19 @@ impl PostingList {
     }
 
     pub fn current(&mut self) -> u64 {
-        if !self.ensure_buffer_filled() {
+        if !self.ensure_buffer_has_data() {
             return NO_DOC;
         }
         self.buffer[self.position]
     }
 
-    fn ensure_buffer_filled(&mut self) -> bool {
-        if self.position >= self.capacity {
-            let capacity = self.decoder.next_batch(&mut self.buffer);
-            if capacity == 0 {
-                return false;
-            }
-            self.position = 0;
-            self.capacity = capacity;
+    fn ensure_buffer_has_data(&mut self) -> bool {
+        if self.position < self.len {
+            return true;
         }
-        return true;
+        self.len = self.decoder.next_batch(&mut self.buffer);
+        self.position = 0;
+        return self.len > 0;
     }
 }
 
@@ -152,39 +148,28 @@ pub struct Merge(PostingList, PostingList);
 
 impl PostingListDecoder for Merge {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        fn read_next(merge: &mut Merge) -> u64 {
-            let a = merge.0.current();
-            let b = merge.1.current();
-            match (a, b) {
-                (NO_DOC, NO_DOC) => NO_DOC,
-                (a, NO_DOC) => {
-                    merge.0.next();
-                    a
-                }
-                (NO_DOC, b) => {
-                    merge.1.next();
-                    b
-                }
-                (a, b) => {
-                    if a <= b {
-                        merge.0.next();
-                    }
-                    if b <= a {
-                        merge.1.next();
-                    }
-                    a.min(b)
-                }
+        let mut a = self.0.current();
+        let mut b = self.1.current();
+        let mut i = 0;
+        while i < buffer.len() && (a != NO_DOC || b != NO_DOC) {
+            while a < b && i < buffer.len() && a != NO_DOC {
+                buffer[i] = a;
+                i += 1;
+                a = self.0.next();
+            }
+            while b < a && i < buffer.len() && b != NO_DOC {
+                buffer[i] = b;
+                i += 1;
+                b = self.1.next();
+            }
+            while a == b && a != NO_DOC && b != NO_DOC && i < buffer.len() {
+                buffer[i] = b;
+                i += 1;
+                a = self.0.next();
+                b = self.1.next();
             }
         }
-
-        for i in 0..buffer.len() {
-            let doc_id = read_next(self);
-            if doc_id == NO_DOC {
-                return i;
-            }
-            buffer[i] = doc_id;
-        }
-        buffer.len()
+        i
     }
 }
 
