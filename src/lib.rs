@@ -119,6 +119,7 @@ impl<T: PostingListDecoder + 'static> From<T> for PostingList {
 
 impl PostingList {
     #[allow(clippy::should_implement_trait)]
+    #[inline]
     pub fn next(&mut self) -> u64 {
         self.position += 1;
         if !self.ensure_buffer_has_data() {
@@ -146,6 +147,7 @@ impl PostingList {
         current
     }
 
+    #[inline]
     pub fn current(&mut self) -> u64 {
         if !self.ensure_buffer_has_data() {
             return NO_DOC;
@@ -153,6 +155,7 @@ impl PostingList {
         self.buffer[self.position]
     }
 
+    #[inline]
     fn ensure_buffer_has_data(&mut self) -> bool {
         if self.position < self.len {
             return true;
