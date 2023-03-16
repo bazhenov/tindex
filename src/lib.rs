@@ -177,33 +177,27 @@ pub struct Intersect(PostingList, PostingList);
 
 impl PostingListDecoder for Intersect {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        fn next(intersect: &mut Intersect) -> u64 {
-            let mut target = intersect.0.next();
-            if target == NO_DOC {
-                return NO_DOC;
+        let mut a = self.0.current();
+        let mut b = self.1.current();
+        let mut i = 0;
+        while a != NO_DOC && b != NO_DOC {
+            if a < b {
+                a = self.0.advance(b);
             }
-            loop {
-                match intersect.1.advance(target) {
-                    NO_DOC => return NO_DOC,
-                    candidate if candidate == target => return target,
-                    candidate => target = candidate,
-                };
-                match intersect.0.advance(target) {
-                    NO_DOC => return NO_DOC,
-                    candidate if candidate == target => return target,
-                    candidate => target = candidate,
-                };
+            if b < a {
+                b = self.1.advance(a);
+            }
+            while a == b && a != NO_DOC && b != NO_DOC {
+                buffer[i] = b;
+                i += 1;
+                a = self.0.next();
+                b = self.1.next();
+                if i >= buffer.len() {
+                    return i;
+                }
             }
         }
-
-        for i in 0..buffer.len() {
-            let doc_id = next(self);
-            if doc_id == NO_DOC {
-                return i;
-            }
-            buffer[i] = doc_id;
-        }
-        return buffer.len();
+        i
     }
 }
 
