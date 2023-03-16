@@ -271,6 +271,11 @@ impl RangePostingList {
 
 impl PostingListDecoder for RangePostingList {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
+        self.next_batch_advance(self.next, buffer)
+    }
+
+    fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = target;
         let start = self.next;
         if start >= self.range.end {
             return 0;
@@ -379,7 +384,7 @@ mod tests {
         assert_eq!(t.next_batch_advance(10, &mut buffer), 3);
         assert_eq!(buffer, [10, 11, 12]);
 
-        assert_eq!(t.next_batch_advance(998, &mut buffer), 3);
-        assert_eq!(buffer, [997, 998, 999]);
+        assert_eq!(t.next_batch_advance(998, &mut buffer), 2);
+        assert_eq!(buffer[..2], [998, 999]);
     }
 }
