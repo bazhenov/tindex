@@ -1,4 +1,9 @@
-use std::ops::Range;
+#![feature(portable_simd)]
+
+use std::{
+    ops::Range,
+    simd::{u64x8, SimdPartialEq},
+};
 
 pub mod encoding;
 
@@ -44,8 +49,11 @@ pub trait PostingListDecoder {
     }
 }
 
-pub fn intersect(a: PostingList, b: PostingList) -> PostingList {
-    Intersect(a, b).into()
+pub fn intersect(
+    a: impl PostingListDecoder + 'static,
+    b: impl PostingListDecoder + 'static,
+) -> Intersect {
+    Intersect(Box::new(a), Box::new(b), [0; 8], 0).into()
 }
 
 pub fn merge(a: PostingList, b: PostingList) -> PostingList {
@@ -104,6 +112,15 @@ impl PostingList {
         current
     }
 
+    // fn fill_buffer(&mut self, buffer: &mut [u64; 4]) -> usize {
+    //     if self.position + 4 < buffer.len() {
+    //         buffer.copy_from_slice(&self.buffer[self.position..self.position + 4]);
+    //         self.position += 4;
+    //         return 4;
+    //     }else if
+    //     decoder.next_batch(&mut buffer[..])
+    // }
+
     #[inline]
     pub fn current(&mut self) -> u64 {
         if !self.ensure_buffer_has_data() {
@@ -152,31 +169,104 @@ impl PostingListDecoder for Merge {
     }
 }
 
-pub struct Intersect(pub PostingList, pub PostingList);
+pub struct Intersect(
+    Box<dyn PostingListDecoder>,
+    Box<dyn PostingListDecoder>,
+    pub [u64; 8],
+    pub usize,
+);
 
 impl PostingListDecoder for Intersect {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        let mut a = self.0.current();
-        let mut b = self.1.current();
-        let mut i = 0;
-        while a != NO_DOC && b != NO_DOC {
-            if a < b {
-                a = self.0.advance(b);
+        let mut buffer_idx = 0;
+        let stash = &mut self.2;
+        let stash_idx = &mut self.3;
+
+        let mut a = [0; 8];
+        let mut b = [0; 8];
+
+        while *stash_idx > 0 && buffer_idx < buffer.len() {
+            buffer[buffer_idx] = stash[*stash_idx];
+            *stash_idx -= 1;
+            buffer_idx += 1;
+        }
+
+        if buffer_idx == buffer.len() {
+            return buffer.len();
+        }
+
+        a.fill(0);
+        if self.0.next_batch(&mut a) == 0 {
+            return 0;
+        }
+
+        loop {
+            let elements_read = if a.last().unwrap() < b.last().unwrap() {
+                a.fill(0);
+                self.0.next_batch(&mut a)
+            } else {
+                b.fill(0);
+                self.1.next_batch(&mut b)
+            };
+
+            if elements_read == 0 {
+                return buffer_idx;
             }
-            if b < a {
-                b = self.1.advance(a);
-            }
-            while a == b && a != NO_DOC && b != NO_DOC {
-                buffer[i] = b;
-                i += 1;
-                a = self.0.next();
-                b = self.1.next();
-                if i >= buffer.len() {
-                    return i;
+
+            let a_simd = u64x8::from(a);
+            let b_simd = u64x8::from(b);
+            let r0 = b_simd.rotate_lanes_left::<0>();
+            let r1 = b_simd.rotate_lanes_left::<1>();
+            let r2 = b_simd.rotate_lanes_left::<2>();
+            let r3 = b_simd.rotate_lanes_left::<3>();
+            let r4 = b_simd.rotate_lanes_left::<4>();
+            let r5 = b_simd.rotate_lanes_left::<5>();
+            let r6 = b_simd.rotate_lanes_left::<6>();
+            let r7 = b_simd.rotate_lanes_left::<7>();
+
+            let mask = a_simd.simd_eq(r0)
+                | a_simd.simd_eq(r1)
+                | a_simd.simd_eq(r2)
+                | a_simd.simd_eq(r3)
+                | a_simd.simd_eq(r4)
+                | a_simd.simd_eq(r5)
+                | a_simd.simd_eq(r6)
+                | a_simd.simd_eq(r7);
+
+            let matches = mask.to_array();
+
+            // TODO replace code with pshufb/scatter
+            let mut match_idx = 0;
+            while buffer_idx < buffer.len() && match_idx < a.len() {
+                if a[match_idx] == 0 {
+                    break;
                 }
+                if matches[match_idx] {
+                    buffer[buffer_idx] = a[match_idx];
+                    buffer_idx += 1;
+                }
+                match_idx += 1;
+            }
+
+            while match_idx < a.len() && match_idx < a.len() {
+                if a[match_idx] == 0 {
+                    break;
+                }
+                if matches[match_idx] {
+                    stash[*stash_idx] = a[match_idx];
+                    *stash_idx += 1;
+                }
+                match_idx += 1;
+            }
+
+            if buffer_idx == buffer.len() {
+                return buffer.len();
+            }
+
+            if *a.last().unwrap() == 0 || *b.last().unwrap() == 0 {
+                return buffer_idx;
             }
         }
-        i
     }
 }
 
@@ -290,13 +380,15 @@ mod tests {
     use std::fmt::Debug;
     use std::panic;
     use std::panic::RefUnwindSafe;
+    use std::simd::u64x4;
+    use std::simd::SimdPartialEq;
 
     #[test]
-    fn check_intersect() {
+    fn check_intersect_simple() {
         let a = RangePostingList::new(1..5);
         let b = RangePostingList::new(2..7);
 
-        let values = Intersect(a.into(), b.into()).to_vec();
+        let values = intersect(a, b).to_vec();
         assert_eq!(values, vec![2, 3, 4]);
     }
 
@@ -344,13 +436,17 @@ mod tests {
 
     #[test]
     fn check_intersect_massive() {
+        // let seed = [
+        //     38, 249, 210, 60, 25, 139, 148, 27, 43, 55, 72, 59, 118, 36, 26, 1, 237, 60, 144, 244,
+        //     23, 87, 77, 245, 98, 164, 9, 25, 117, 242, 86, 74,
+        // ];
         run_seeded_test::<StdRng>(None, |mut rng| {
             for _ in 0..100 {
                 let a = random_posting_list(&mut rng);
                 let b = random_posting_list(&mut rng);
 
                 let expected = naive_intersect(&a.data, &b.data);
-                let actual = Intersect(a.into(), b.into()).to_vec();
+                let actual = intersect(a, b).to_vec();
 
                 assert_eq!(actual, expected);
             }
@@ -416,6 +512,7 @@ mod tests {
     where
         R::Seed: Fill + Debug + Copy + RefUnwindSafe,
     {
+        let seed_provided = seed.is_some();
         let seed = seed.unwrap_or_else(|| {
             let mut seed = Default::default();
             thread_rng().fill(&mut seed);
@@ -427,10 +524,14 @@ mod tests {
         });
 
         if result.is_err() {
-            panic!(
-                "Test are failed. Check following seed:\n\n  ==> seed: {:?}\n\n",
-                seed
-            );
+            if seed_provided {
+                panic!("Test are failed");
+            } else {
+                panic!(
+                    "Test are failed. Check following seed:\n\n  ==> seed: {:?}\n\n",
+                    seed
+                );
+            }
         }
     }
 
@@ -444,5 +545,20 @@ mod tests {
             list.push(doc_id)
         }
         VecPostingList::new(&list)
+    }
+
+    #[test]
+    fn check_simd_load_store() {
+        let a = u64x4::from([1u64, 2, 3, 4]);
+        let b = u64x4::from([2u64, 3, 6, 8]);
+
+        let r0 = b.rotate_lanes_left::<0>();
+        let r1 = b.rotate_lanes_left::<1>();
+        let r2 = b.rotate_lanes_left::<2>();
+        let r3 = b.rotate_lanes_left::<3>();
+
+        let mask = a.simd_eq(r0) | a.simd_eq(r1) | a.simd_eq(r2) | a.simd_eq(r3);
+        let output = mask.to_array();
+        assert_eq!(output, [false, true, true, false]);
     }
 }

@@ -6,7 +6,7 @@ use anyhow::bail;
 use fn_error_context::context;
 use pest::{iterators::Pairs, Parser};
 use pest_derive::Parser;
-use tindex_core::{Exclude, Intersect, Merge, PostingList};
+use tindex_core::{Exclude, Merge, PostingList};
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
@@ -34,7 +34,7 @@ fn visit(node: Ast, index: &impl Index) -> Result<PostingList> {
         Ast::Ident(name) => index.lookup(&name)?.into(),
         Ast::Exclude(lv, rv) => Exclude(visit(*lv, index)?, visit(*rv, index)?).into(),
         Ast::Merge(lv, rv) => Merge(visit(*lv, index)?, visit(*rv, index)?).into(),
-        Ast::Intersect(lv, rv) => Intersect(visit(*lv, index)?, visit(*rv, index)?).into(),
+        Ast::Intersect(lv, rv) => unimplemented!(),
     };
     Ok(result)
 }

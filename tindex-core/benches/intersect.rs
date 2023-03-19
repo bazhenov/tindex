@@ -9,7 +9,7 @@ pub fn posting_list_intersect(c: &mut Criterion) {
         let a = RangePostingList::new(1..1_000);
         let b = RangePostingList::new(500..1_000);
         bench.iter_batched(
-            || intersect(a.clone().into(), b.clone().into()),
+            || intersect(a.clone(), b.clone()).into(),
             traverse,
             BatchSize::SmallInput,
         );
@@ -19,7 +19,7 @@ pub fn posting_list_intersect(c: &mut Criterion) {
     g.bench_function("Full Intersect", |bench| {
         let a = RangePostingList::new(1..1_000);
         bench.iter_batched(
-            || intersect(a.clone().into(), a.clone().into()),
+            || intersect(a.clone(), a.clone()).into(),
             traverse,
             BatchSize::SmallInput,
         );
@@ -30,7 +30,7 @@ pub fn posting_list_intersect(c: &mut Criterion) {
         let a = RangePostingList::new(1..1_000);
         let b = RangePostingList::new(1_000..2_000);
         bench.iter_batched(
-            || intersect(a.clone().into(), b.clone().into()),
+            || intersect(a.clone(), b.clone()).into(),
             traverse,
             BatchSize::SmallInput,
         );
