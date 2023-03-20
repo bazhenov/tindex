@@ -1,6 +1,13 @@
 #![feature(portable_simd)]
+#![feature(stdsimd)]
 
+use lazy_static::lazy_static;
 use std::{
+    arch::x86_64::{
+        _mm256_alignr_epi64, _mm256_cmpeq_epi64, _mm256_loadu_epi64, _mm256_movemask_epi8,
+        _mm256_or_epi64,
+    },
+    hint::black_box,
     ops::Range,
     simd::{u64x4, usizex4, SimdPartialEq, ToBitMask},
 };
@@ -10,6 +17,46 @@ pub mod encoding;
 mod prelude {
     pub type Result<T> = anyhow::Result<T>;
     pub type IoResult<T> = std::io::Result<T>;
+}
+
+lazy_static! {
+    static ref MASKS: [(usize, usizex4); 16] = [
+        (0, usizex4::from([4, 4, 4, 4])), // 0000 - 0
+        (1, usizex4::from([0, 4, 4, 4])), // 1000 - 1
+        (1, usizex4::from([4, 0, 4, 4])), // 0100 - 2
+        (2, usizex4::from([0, 1, 4, 4])), // 1100 - 3
+        (1, usizex4::from([4, 4, 0, 4])), // 0010 - 4
+        (2, usizex4::from([0, 4, 1, 4])), // 1010 - 5
+        (2, usizex4::from([4, 0, 1, 4])), // 0110 - 6
+        (3, usizex4::from([0, 1, 2, 4])), // 1110 - 7
+        (1, usizex4::from([4, 4, 4, 0])), // 0001 - 8
+        (2, usizex4::from([0, 4, 4, 1])), // 1001 - 9
+        (2, usizex4::from([4, 0, 4, 1])), // 0101 - 10
+        (3, usizex4::from([0, 1, 4, 2])), // 1101 - 11
+        (2, usizex4::from([4, 4, 0, 1])), // 0011 - 12
+        (3, usizex4::from([0, 4, 1, 2])), // 1011 - 13
+        (3, usizex4::from([4, 0, 1, 2])), // 0111 - 14
+        (4, usizex4::from([0, 1, 2, 3])), // 1111 - 15
+    ];
+
+    static ref LENGTHS: [usize; 16] = [
+        0,
+        1,
+        1,
+        2,
+        1,
+        2,
+        2,
+        3,
+        1,
+        2,
+        2,
+        3,
+        2,
+        3,
+        3,
+        4,
+    ];
 }
 
 pub const NO_DOC: u64 = u64::MAX;
@@ -182,24 +229,7 @@ impl PostingListDecoder for Intersect {
         let stash = &mut self.2;
         let stash_idx = &mut self.3;
 
-        let masks: [(usize, usizex4); 16] = [
-            (0, usizex4::from([4, 4, 4, 4])), // 0000 - 0
-            (1, usizex4::from([0, 4, 4, 4])), // 1000 - 1
-            (1, usizex4::from([4, 0, 4, 4])), // 0100 - 2
-            (2, usizex4::from([0, 1, 4, 4])), // 1100 - 3
-            (1, usizex4::from([4, 4, 0, 4])), // 0010 - 4
-            (2, usizex4::from([0, 4, 1, 4])), // 1010 - 5
-            (2, usizex4::from([4, 0, 1, 4])), // 0110 - 6
-            (3, usizex4::from([0, 1, 2, 4])), // 1110 - 7
-            (1, usizex4::from([4, 4, 4, 0])), // 0001 - 8
-            (2, usizex4::from([0, 4, 4, 1])), // 1001 - 9
-            (2, usizex4::from([4, 0, 4, 1])), // 0101 - 10
-            (3, usizex4::from([0, 1, 4, 2])), // 1101 - 11
-            (2, usizex4::from([4, 4, 0, 1])), // 0011 - 12
-            (3, usizex4::from([0, 4, 1, 2])), // 1011 - 13
-            (3, usizex4::from([4, 0, 1, 2])), // 0111 - 14
-            (4, usizex4::from([0, 1, 2, 3])), // 1111 - 15
-        ];
+        let masks = &MASKS;
 
         let mut a = [0; 4];
         let mut b = [0; 4];
@@ -220,27 +250,39 @@ impl PostingListDecoder for Intersect {
         let mut b_read = self.1.next_batch(&mut b);
 
         while buffer_idx + 4 < buffer.len() && a_read == a.len() && b_read == b.len() {
-            let a_simd = u64x4::from(a);
-            let b_simd = u64x4::from(b);
-            let r0 = b_simd.rotate_lanes_left::<0>();
-            let r1 = b_simd.rotate_lanes_left::<1>();
-            let r2 = b_simd.rotate_lanes_left::<2>();
-            let r3 = b_simd.rotate_lanes_left::<3>();
+            let mask_idx = unsafe {
+                let a = _mm256_loadu_epi64(a.as_ptr() as *const i64);
+                let b = _mm256_loadu_epi64(b.as_ptr() as *const i64);
 
-            let mask =
-                a_simd.simd_eq(r0) | a_simd.simd_eq(r1) | a_simd.simd_eq(r2) | a_simd.simd_eq(r3);
+                let r0 = _mm256_alignr_epi64(b, b, 0);
+                let r1 = _mm256_alignr_epi64(b, b, 1);
+                let r2 = _mm256_alignr_epi64(b, b, 2);
+                let r3 = _mm256_alignr_epi64(b, b, 3);
+
+                let mask1 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r0), _mm256_cmpeq_epi64(a, r1));
+                let mask2 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r2), _mm256_cmpeq_epi64(a, r3));
+                let mask = _mm256_or_epi64(mask1, mask2);
+                let mask = _mm256_movemask_epi8(mask);
+                ((mask >> 31) & 1) << 3
+                    | ((mask >> 23) & 1) << 2
+                    | ((mask >> 15) & 1) << 1
+                    | ((mask >> 7) & 1) << 0
+            };
+            black_box(mask_idx);
 
             // TODO replace code with pshufb/scatter
-            let mask_idx = mask.to_bitmask() as usize;
-            let (len, mask) = masks[mask_idx];
-            a_simd.scatter(&mut buffer[buffer_idx..buffer_idx + 4], mask);
-            buffer_idx += len;
+            // let mask_idx = mask.to_bitmask() as usize;
+            // let a_simd = u64x4::from(a);
+            // let (len, mask) = masks[mask_idx as usize];
+            // a_simd.scatter(&mut buffer[buffer_idx..buffer_idx + 4], mask);
+            // buffer_idx += LENGTHS[mask_idx as usize];
+
             // let mut match_idx = 0;
             // while buffer_idx < buffer.len() && match_idx < a.len() {
             //     if a[match_idx] == 0 {
             //         break;
             //     }
-            //     if matches[match_idx] {
+            //     if matches[match_idx] > 0 {
             //         buffer[buffer_idx] = a[match_idx];
             //         buffer_idx += 1;
             //     }
@@ -561,6 +603,30 @@ mod tests {
         let mask = a.simd_eq(r0) | a.simd_eq(r1) | a.simd_eq(r2) | a.simd_eq(r3);
         let output = mask.to_array();
         assert_eq!(output, [false, true, true, false]);
+    }
+
+    #[test]
+    fn check_simd_intrinsic_load_store() {
+        unsafe {
+            let a = _mm256_loadu_epi64([1u64, 2, 3, 4].as_ptr() as *const i64);
+            let b = _mm256_loadu_epi64([2u64, 3, 6, 8].as_ptr() as *const i64);
+
+            let r0 = _mm256_alignr_epi64(b, b, 0);
+            let r1 = _mm256_alignr_epi64(b, b, 1);
+            let r2 = _mm256_alignr_epi64(b, b, 2);
+            let r3 = _mm256_alignr_epi64(b, b, 3);
+
+            let mask1 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r0), _mm256_cmpeq_epi64(a, r1));
+            let mask2 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r2), _mm256_cmpeq_epi64(a, r3));
+            let mask = _mm256_or_epi64(mask1, mask2);
+            let mask = _mm256_movemask_epi8(mask);
+            let mask = ((mask >> 31) & 1) << 3
+                | ((mask >> 23) & 1) << 2
+                | ((mask >> 15) & 1) << 1
+                | ((mask >> 7) & 1) << 0;
+
+            assert_eq!(6, mask);
+        }
     }
 
     #[test]

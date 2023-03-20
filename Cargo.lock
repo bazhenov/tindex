@@ -2828,6 +2828,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "criterion",
+ "lazy_static",
  "log",
  "rand",
  "tempfile",

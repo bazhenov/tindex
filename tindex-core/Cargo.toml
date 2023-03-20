@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0"
+lazy_static = "1.4.0"
 log = "0.4.17"
 thiserror = "1.0"
 
