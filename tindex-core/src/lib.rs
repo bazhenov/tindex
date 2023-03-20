@@ -2,7 +2,7 @@
 
 use std::{
     ops::Range,
-    simd::{u64x8, SimdPartialEq},
+    simd::{u64x4, SimdPartialEq},
 };
 
 pub mod encoding;
@@ -182,8 +182,8 @@ impl PostingListDecoder for Intersect {
         let stash = &mut self.2;
         let stash_idx = &mut self.3;
 
-        let mut a = [0; 8];
-        let mut b = [0; 8];
+        let mut a = [0; 4];
+        let mut b = [0; 4];
 
         while *stash_idx > 0 && buffer_idx < buffer.len() {
             buffer[buffer_idx] = stash[*stash_idx];
@@ -213,25 +213,15 @@ impl PostingListDecoder for Intersect {
                 return buffer_idx;
             }
 
-            let a_simd = u64x8::from(a);
-            let b_simd = u64x8::from(b);
+            let a_simd = u64x4::from(a);
+            let b_simd = u64x4::from(b);
             let r0 = b_simd.rotate_lanes_left::<0>();
             let r1 = b_simd.rotate_lanes_left::<1>();
             let r2 = b_simd.rotate_lanes_left::<2>();
             let r3 = b_simd.rotate_lanes_left::<3>();
-            let r4 = b_simd.rotate_lanes_left::<4>();
-            let r5 = b_simd.rotate_lanes_left::<5>();
-            let r6 = b_simd.rotate_lanes_left::<6>();
-            let r7 = b_simd.rotate_lanes_left::<7>();
 
-            let mask = a_simd.simd_eq(r0)
-                | a_simd.simd_eq(r1)
-                | a_simd.simd_eq(r2)
-                | a_simd.simd_eq(r3)
-                | a_simd.simd_eq(r4)
-                | a_simd.simd_eq(r5)
-                | a_simd.simd_eq(r6)
-                | a_simd.simd_eq(r7);
+            let mask =
+                a_simd.simd_eq(r0) | a_simd.simd_eq(r1) | a_simd.simd_eq(r2) | a_simd.simd_eq(r3);
 
             let matches = mask.to_array();
 
@@ -381,6 +371,7 @@ mod tests {
     use std::panic;
     use std::panic::RefUnwindSafe;
     use std::simd::u64x4;
+    use std::simd::usizex4;
     use std::simd::SimdPartialEq;
 
     #[test]
@@ -549,8 +540,8 @@ mod tests {
 
     #[test]
     fn check_simd_load_store() {
-        let a = u64x4::from([1u64, 2, 3, 4]);
-        let b = u64x4::from([2u64, 3, 6, 8]);
+        let a = u64x4::from([1, 2, 3, 4]);
+        let b = u64x4::from([2, 3, 6, 8]);
 
         let r0 = b.rotate_lanes_left::<0>();
         let r1 = b.rotate_lanes_left::<1>();
@@ -560,5 +551,15 @@ mod tests {
         let mask = a.simd_eq(r0) | a.simd_eq(r1) | a.simd_eq(r2) | a.simd_eq(r3);
         let output = mask.to_array();
         assert_eq!(output, [false, true, true, false]);
+    }
+
+    #[test]
+    fn check_simd_scatter() {
+        let a = u64x4::from([1, 2, 3, 4]);
+        let idx = usizex4::from([1, 2, 3, 4]);
+        let mut output = [0u64; 4];
+        a.scatter(&mut output, idx);
+
+        assert_eq!(output, [0, 1, 2, 3]);
     }
 }
