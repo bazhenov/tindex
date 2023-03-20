@@ -2,7 +2,7 @@
 
 use std::{
     ops::Range,
-    simd::{u64x4, SimdPartialEq},
+    simd::{u64x4, usizex4, SimdPartialEq, ToBitMask},
 };
 
 pub mod encoding;
@@ -182,6 +182,25 @@ impl PostingListDecoder for Intersect {
         let stash = &mut self.2;
         let stash_idx = &mut self.3;
 
+        let masks: [(usize, usizex4); 16] = [
+            (0, usizex4::from([4, 4, 4, 4])), // 0000 - 0
+            (1, usizex4::from([0, 4, 4, 4])), // 1000 - 1
+            (1, usizex4::from([4, 0, 4, 4])), // 0100 - 2
+            (2, usizex4::from([0, 1, 4, 4])), // 1100 - 3
+            (1, usizex4::from([4, 4, 0, 4])), // 0010 - 4
+            (2, usizex4::from([0, 4, 1, 4])), // 1010 - 5
+            (2, usizex4::from([4, 0, 1, 4])), // 0110 - 6
+            (3, usizex4::from([0, 1, 2, 4])), // 1110 - 7
+            (1, usizex4::from([4, 4, 4, 0])), // 0001 - 8
+            (2, usizex4::from([0, 4, 4, 1])), // 1001 - 9
+            (2, usizex4::from([4, 0, 4, 1])), // 0101 - 10
+            (3, usizex4::from([0, 1, 4, 2])), // 1101 - 11
+            (2, usizex4::from([4, 4, 0, 1])), // 0011 - 12
+            (3, usizex4::from([0, 4, 1, 2])), // 1011 - 13
+            (3, usizex4::from([4, 0, 1, 2])), // 0111 - 14
+            (4, usizex4::from([0, 1, 2, 3])), // 1111 - 15
+        ];
+
         let mut a = [0; 4];
         let mut b = [0; 4];
 
@@ -195,24 +214,12 @@ impl PostingListDecoder for Intersect {
             return buffer.len();
         }
 
-        a.fill(0);
-        if self.0.next_batch(&mut a) == 0 {
-            return 0;
-        }
+        // a.fill(0);
+        let mut a_read = self.0.next_batch(&mut a);
+        // b.fill(0);
+        let mut b_read = self.1.next_batch(&mut b);
 
-        loop {
-            let elements_read = if a.last().unwrap() < b.last().unwrap() {
-                a.fill(0);
-                self.0.next_batch(&mut a)
-            } else {
-                b.fill(0);
-                self.1.next_batch(&mut b)
-            };
-
-            if elements_read == 0 {
-                return buffer_idx;
-            }
-
+        while buffer_idx + 4 < buffer.len() && a_read == a.len() && b_read == b.len() {
             let a_simd = u64x4::from(a);
             let b_simd = u64x4::from(b);
             let r0 = b_simd.rotate_lanes_left::<0>();
@@ -223,40 +230,43 @@ impl PostingListDecoder for Intersect {
             let mask =
                 a_simd.simd_eq(r0) | a_simd.simd_eq(r1) | a_simd.simd_eq(r2) | a_simd.simd_eq(r3);
 
-            let matches = mask.to_array();
-
             // TODO replace code with pshufb/scatter
-            let mut match_idx = 0;
-            while buffer_idx < buffer.len() && match_idx < a.len() {
-                if a[match_idx] == 0 {
-                    break;
-                }
-                if matches[match_idx] {
-                    buffer[buffer_idx] = a[match_idx];
-                    buffer_idx += 1;
-                }
-                match_idx += 1;
-            }
+            let mask_idx = mask.to_bitmask() as usize;
+            let (len, mask) = masks[mask_idx];
+            a_simd.scatter(&mut buffer[buffer_idx..buffer_idx + 4], mask);
+            buffer_idx += len;
+            // let mut match_idx = 0;
+            // while buffer_idx < buffer.len() && match_idx < a.len() {
+            //     if a[match_idx] == 0 {
+            //         break;
+            //     }
+            //     if matches[match_idx] {
+            //         buffer[buffer_idx] = a[match_idx];
+            //         buffer_idx += 1;
+            //     }
+            //     match_idx += 1;
+            // }
 
-            while match_idx < a.len() && match_idx < a.len() {
-                if a[match_idx] == 0 {
-                    break;
-                }
-                if matches[match_idx] {
-                    stash[*stash_idx] = a[match_idx];
-                    *stash_idx += 1;
-                }
-                match_idx += 1;
-            }
+            // while match_idx < a.len() && match_idx < a.len() {
+            //     if a[match_idx] == 0 {
+            //         break;
+            //     }
+            //     if matches[match_idx] {
+            //         stash[*stash_idx] = a[match_idx];
+            //         *stash_idx += 1;
+            //     }
+            //     match_idx += 1;
+            // }
 
-            if buffer_idx == buffer.len() {
-                return buffer.len();
-            }
-
-            if *a.last().unwrap() == 0 || *b.last().unwrap() == 0 {
-                return buffer_idx;
-            }
+            if a.last().unwrap() < b.last().unwrap() {
+                // a.fill(0);
+                a_read = self.0.next_batch(&mut a);
+            } else {
+                // b.fill(0);
+                b_read = self.1.next_batch(&mut b);
+            };
         }
+        return buffer_idx;
     }
 }
 
@@ -556,10 +566,28 @@ mod tests {
     #[test]
     fn check_simd_scatter() {
         let a = u64x4::from([1, 2, 3, 4]);
-        let idx = usizex4::from([1, 2, 3, 4]);
+        let masks: [(usize, usizex4); 16] = [
+            (0, usizex4::from([4, 4, 4, 4])), // 0000
+            (1, usizex4::from([4, 4, 4, 0])), // 0001
+            (1, usizex4::from([4, 4, 0, 4])), // 0010
+            (2, usizex4::from([4, 4, 0, 1])), // 0011
+            (1, usizex4::from([4, 0, 4, 4])), // 0100
+            (2, usizex4::from([4, 0, 4, 1])), // 0101
+            (2, usizex4::from([4, 0, 1, 4])), // 0110
+            (3, usizex4::from([4, 0, 1, 2])), // 0111
+            (1, usizex4::from([0, 4, 4, 4])), // 1000
+            (2, usizex4::from([0, 4, 4, 1])), // 1001
+            (2, usizex4::from([0, 4, 1, 4])), // 1010
+            (3, usizex4::from([0, 4, 1, 2])), // 1011
+            (2, usizex4::from([0, 1, 4, 4])), // 1100
+            (3, usizex4::from([0, 1, 4, 2])), // 1101
+            (3, usizex4::from([0, 1, 2, 4])), // 1110
+            (4, usizex4::from([0, 1, 2, 3])), // 1111
+        ];
         let mut output = [0u64; 4];
-        a.scatter(&mut output, idx);
-
-        assert_eq!(output, [0, 1, 2, 3]);
+        let (len, mask) = &masks[5];
+        a.scatter(&mut output, *mask);
+        assert_eq!(*len, 2);
+        assert_eq!(output, [2, 4, 0, 0]);
     }
 }
