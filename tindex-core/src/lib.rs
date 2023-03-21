@@ -17,20 +17,20 @@ mod prelude {
 lazy_static! {
     static ref MASKS: [(usize, usizex4); 16] = [
         (0, usizex4::from([4, 4, 4, 4])), // 0000 - 0
-        (1, usizex4::from([4, 4, 4, 0])), // 0001 - 1
-        (1, usizex4::from([4, 4, 0, 4])), // 0010 - 2
-        (2, usizex4::from([4, 4, 0, 1])), // 0011 - 3
-        (1, usizex4::from([4, 0, 4, 4])), // 0100 - 4
-        (2, usizex4::from([4, 0, 4, 1])), // 0101 - 5
+        (1, usizex4::from([0, 4, 4, 4])), // 1000 - 1
+        (1, usizex4::from([4, 0, 4, 4])), // 0100 - 2
+        (2, usizex4::from([0, 1, 4, 4])), // 1100 - 3
+        (1, usizex4::from([4, 4, 0, 4])), // 0010 - 4
+        (2, usizex4::from([0, 4, 1, 4])), // 1010 - 5
         (2, usizex4::from([4, 0, 1, 4])), // 0110 - 6
-        (3, usizex4::from([4, 0, 1, 2])), // 0111 - 7
-        (1, usizex4::from([0, 4, 4, 4])), // 1000 - 8
+        (3, usizex4::from([0, 1, 2, 4])), // 1110 - 7
+        (1, usizex4::from([4, 4, 4, 0])), // 0001 - 8
         (2, usizex4::from([0, 4, 4, 1])), // 1001 - 9
-        (2, usizex4::from([0, 4, 1, 4])), // 1010 - 10
-        (3, usizex4::from([0, 4, 1, 2])), // 1011 - 11
-        (2, usizex4::from([0, 1, 4, 4])), // 1100 - 12
-        (3, usizex4::from([0, 1, 4, 2])), // 1101 - 13
-        (3, usizex4::from([0, 1, 2, 4])), // 1110 - 14
+        (2, usizex4::from([4, 0, 4, 1])), // 0101 - 10
+        (3, usizex4::from([0, 1, 4, 2])), // 1101 - 11
+        (2, usizex4::from([4, 4, 0, 1])), // 0011 - 12
+        (3, usizex4::from([0, 4, 1, 2])), // 1011 - 13
+        (3, usizex4::from([4, 0, 1, 2])), // 0111 - 14
         (4, usizex4::from([0, 1, 2, 3])), // 1111 - 15
     ];
 
@@ -253,9 +253,6 @@ impl<const N: usize> Buffer<N> {
         let len = decoder.next_batch_advance(target, &mut self.buffer[items_left..]);
         self.capacity = len + items_left;
         self.pos = 0;
-        if self.capacity < N {
-            self.buffer[self.capacity..].fill(0);
-        }
         self.capacity
     }
 }
@@ -288,7 +285,7 @@ impl PostingListDecoder for Intersect {
             self.b.refill(self.b_decoder.as_mut());
         }
 
-        while buffer.len() - buffer_pos <= LANES
+        while buffer.len() - buffer_pos >= LANES
             && self.a.items_left() >= LANES
             && self.b.items_left() >= LANES
         {
@@ -312,34 +309,25 @@ impl PostingListDecoder for Intersect {
             let mask =
                 a_simd.simd_eq(r0) | a_simd.simd_eq(r1) | a_simd.simd_eq(r2) | a_simd.simd_eq(r3);
 
-            let mask_idx = reverse4bits(mask.to_bitmask()) as usize;
-            // dbg!(&mask.to_array());
-            let (len, mask) = MASKS[mask_idx];
-            a_simd.scatter(&mut buffer[buffer_pos..buffer_pos + LANES], mask);
-            buffer_pos += len;
-            // dbg!(len);
-            // dbg!(&buffer);
-            // dbg!(&mask_idx);
-            // dbg!(reverse4bits(mask_idx as u8));
+            let mask_idx = mask.to_bitmask();
+            if mask_idx > 0 {
+                let (len, mask) = MASKS[mask_idx as usize];
+                a_simd.scatter(&mut buffer[buffer_pos..buffer_pos + LANES], mask);
+                buffer_pos += len;
+            }
 
-            if a.last().unwrap() < b.last().unwrap() {
+            if a[LANES - 1] <= b[LANES - 1] {
                 self.a.pos += LANES;
                 if self.a.items_left() < LANES {
-                    self.a.refill_advance(b[LANES - 1], self.a_decoder.as_mut());
+                    self.a.refill_advance(b[0], self.a_decoder.as_mut());
                 }
             } else {
                 self.b.pos += LANES;
                 if self.b.items_left() < LANES {
-                    self.b.refill_advance(a[LANES - 1], self.b_decoder.as_mut());
+                    self.b.refill_advance(a[0], self.b_decoder.as_mut());
                 }
             };
         }
-
-        // dbg!(&buffer);
-        // dbg!(self.a_buffer);
-        // dbg!((self.a_position, self.a_capacity));
-        // dbg!(self.b_buffer);
-        // dbg!((self.b_position, self.b_capacity));
 
         // dbg!(buffer_pos);
 
@@ -352,12 +340,12 @@ impl PostingListDecoder for Intersect {
 
             if a == b {
                 buffer[buffer_pos] = a;
-                self.a.pos += 1;
-                self.b.pos += 1;
                 buffer_pos += 1;
-            } else if a < b {
+            }
+            if a <= b {
                 self.a.pos += 1;
-            } else {
+            }
+            if b <= a {
                 self.b.pos += 1;
             }
             if self.a.items_left() == 0 {
@@ -546,8 +534,8 @@ mod tests {
     #[test]
     fn check_intersect_massive() {
         let seed = [
-            71, 254, 118, 3, 30, 11, 164, 87, 231, 202, 4, 94, 71, 208, 178, 90, 154, 191, 156, 19,
-            227, 117, 204, 5, 140, 4, 214, 103, 117, 121, 139, 150,
+            158, 89, 10, 112, 64, 144, 165, 151, 72, 60, 206, 33, 109, 239, 68, 78, 118, 187, 237,
+            203, 159, 240, 236, 12, 175, 97, 49, 240, 63, 199, 149, 83,
         ];
         run_seeded_test::<StdRng>(None, |mut rng| {
             for _ in 0..1000 {
@@ -675,7 +663,7 @@ mod tests {
     fn check_simd_scatter() {
         let a = u64x4::from([1, 2, 3, 4]);
         let mut output = [0u64; 4];
-        let (len, mask) = &MASKS[5]; // 0101
+        let (len, mask) = &MASKS[10]; // 0101
         a.scatter(&mut output, *mask);
         assert_eq!(*len, 2);
         assert_eq!(output, [2, 4, 0, 0]);
