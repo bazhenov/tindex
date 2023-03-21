@@ -1,5 +1,7 @@
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
-use tindex_core::{exclude, intersect, merge, PostingList, RangePostingList, NO_DOC};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
+use tindex_core::{
+    exclude, intersect, merge, PostingList, PostingListDecoder, RangePostingList, NO_DOC,
+};
 
 pub fn posting_list_intersect(c: &mut Criterion) {
     let mut g = c.benchmark_group("Posting List Intersect");
@@ -88,14 +90,41 @@ pub fn posting_list_merge(c: &mut Criterion) {
     });
 }
 
+pub fn posting_list_traverse(c: &mut Criterion) {
+    let mut g = c.benchmark_group("Posting List Traverse");
+    let a = RangePostingList::new(1..1000);
+
+    g.throughput(Throughput::Elements(a.len()));
+    g.bench_function("PostingList", |bench| {
+        bench.iter_batched(|| a.clone().into(), traverse, BatchSize::SmallInput);
+    });
+
+    g.throughput(Throughput::Elements(a.len()));
+    g.bench_function("PostingListDecoder", |bench| {
+        bench.iter_batched(
+            || Box::new(a.clone()) as Box<dyn PostingListDecoder>,
+            |mut d| traverse_decoder(d.as_mut()),
+            BatchSize::SmallInput,
+        );
+    });
+}
+
 fn traverse(mut input: PostingList) {
     while input.next() != NO_DOC {}
+}
+
+#[inline]
+fn traverse_decoder(input: &mut dyn PostingListDecoder) {
+    let mut buffer = [0; 16];
+    while input.next_batch(&mut buffer) != 0 {}
+    black_box(buffer);
 }
 
 criterion_group!(
     benches,
     posting_list_intersect,
     posting_list_merge,
-    posting_list_exclude
+    posting_list_exclude,
+    posting_list_traverse,
 );
 criterion_main!(benches);
