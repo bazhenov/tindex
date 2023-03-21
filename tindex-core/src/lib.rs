@@ -231,9 +231,6 @@ impl PostingListDecoder for Intersect {
 
         let masks = &MASKS;
 
-        let mut a = [0; 4];
-        let mut b = [0; 4];
-
         while *stash_idx > 0 && buffer_idx < buffer.len() {
             buffer[buffer_idx] = stash[*stash_idx];
             *stash_idx -= 1;
@@ -244,12 +241,24 @@ impl PostingListDecoder for Intersect {
             return buffer.len();
         }
 
-        // a.fill(0);
-        let mut a_read = self.0.next_batch(&mut a);
-        // b.fill(0);
-        let mut b_read = self.1.next_batch(&mut b);
+        let mut A = [0; 32];
+        let mut B = [0; 32];
+        let mut a_pos = 0;
+        let mut b_pos = 0;
 
-        while buffer_idx + 4 < buffer.len() && a_read == a.len() && b_read == b.len() {
+        // a.fill(0);
+        let a_read = self.0.next_batch(&mut A);
+        // b.fill(0);
+        let b_read = self.1.next_batch(&mut B);
+
+        if a_read < A.len() || b_read < B.len() {
+            return 0;
+        }
+
+        while buffer_idx + 4 < buffer.len() {
+            let a: &[u64; 4] = A[a_pos..a_pos + 4].try_into().unwrap();
+            let b: &[u64; 4] = B[b_pos..b_pos + 4].try_into().unwrap();
+
             let mask_idx = unsafe {
                 let a = _mm256_loadu_epi64(a.as_ptr() as *const i64);
                 let b = _mm256_loadu_epi64(b.as_ptr() as *const i64);
@@ -272,10 +281,10 @@ impl PostingListDecoder for Intersect {
 
             // TODO replace code with pshufb/scatter
             // let mask_idx = mask.to_bitmask() as usize;
-            // let a_simd = u64x4::from(a);
-            // let (len, mask) = masks[mask_idx as usize];
-            // a_simd.scatter(&mut buffer[buffer_idx..buffer_idx + 4], mask);
-            // buffer_idx += LENGTHS[mask_idx as usize];
+            let a_simd = u64x4::from(*a);
+            let (len, mask) = masks[mask_idx as usize];
+            a_simd.scatter(&mut buffer[buffer_idx..buffer_idx + 4], mask);
+            buffer_idx += LENGTHS[mask_idx as usize];
 
             // let mut match_idx = 0;
             // while buffer_idx < buffer.len() && match_idx < a.len() {
@@ -301,11 +310,25 @@ impl PostingListDecoder for Intersect {
             // }
 
             if a.last().unwrap() < b.last().unwrap() {
+                if a_pos + 4 < A.len() {
+                    a_pos += 4;
+                } else {
+                    if self.0.next_batch_advance(b[0], &mut A) == 0 {
+                        return 0;
+                    }
+                    a_pos = 0;
+                }
                 // a.fill(0);
-                a_read = self.0.next_batch(&mut a);
             } else {
                 // b.fill(0);
-                b_read = self.1.next_batch(&mut b);
+                if b_pos + 4 < B.len() {
+                    b_pos += 4;
+                } else {
+                    if self.0.next_batch_advance(a[0], &mut B) == 0 {
+                        return 0;
+                    }
+                    b_pos = 0;
+                }
             };
         }
         return buffer_idx;
