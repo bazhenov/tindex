@@ -234,16 +234,23 @@ impl<const N: usize> Default for Buffer<N> {
 }
 
 impl<const N: usize> Buffer<N> {
+    #[inline]
     fn items_left(&self) -> usize {
         self.capacity - self.pos
     }
 
+    #[inline]
     fn refill(&mut self, decoder: &mut dyn PostingListDecoder) -> usize {
+        self.refill_advance(0, decoder)
+    }
+
+    #[inline]
+    fn refill_advance(&mut self, target: u64, decoder: &mut dyn PostingListDecoder) -> usize {
         let items_left = self.items_left();
         if items_left > 0 {
             self.buffer.copy_within(self.pos..self.capacity, 0);
         }
-        let len = decoder.next_batch(&mut self.buffer[items_left..]);
+        let len = decoder.next_batch_advance(target, &mut self.buffer[items_left..]);
         self.capacity = len + items_left;
         self.pos = 0;
         if self.capacity < N {
@@ -281,7 +288,7 @@ impl PostingListDecoder for Intersect {
             self.b.refill(self.b_decoder.as_mut());
         }
 
-        while buffer_pos + LANES < buffer.len()
+        while buffer.len() - buffer_pos <= LANES
             && self.a.items_left() >= LANES
             && self.b.items_left() >= LANES
         {
@@ -308,7 +315,7 @@ impl PostingListDecoder for Intersect {
             let mask_idx = reverse4bits(mask.to_bitmask()) as usize;
             // dbg!(&mask.to_array());
             let (len, mask) = MASKS[mask_idx];
-            a_simd.scatter(&mut buffer[buffer_pos..buffer_pos + 4], mask);
+            a_simd.scatter(&mut buffer[buffer_pos..buffer_pos + LANES], mask);
             buffer_pos += len;
             // dbg!(len);
             // dbg!(&buffer);
@@ -318,12 +325,12 @@ impl PostingListDecoder for Intersect {
             if a.last().unwrap() < b.last().unwrap() {
                 self.a.pos += LANES;
                 if self.a.items_left() < LANES {
-                    self.a.refill(self.a_decoder.as_mut());
+                    self.a.refill_advance(b[LANES - 1], self.a_decoder.as_mut());
                 }
             } else {
                 self.b.pos += LANES;
                 if self.b.items_left() < LANES {
-                    self.b.refill(self.b_decoder.as_mut());
+                    self.b.refill_advance(a[LANES - 1], self.b_decoder.as_mut());
                 }
             };
         }
@@ -354,10 +361,10 @@ impl PostingListDecoder for Intersect {
                 self.b.pos += 1;
             }
             if self.a.items_left() == 0 {
-                self.a.refill(self.a_decoder.as_mut());
+                self.a.refill_advance(b, self.a_decoder.as_mut());
             }
             if self.b.items_left() == 0 {
-                self.b.refill(self.b_decoder.as_mut());
+                self.b.refill_advance(a, self.b_decoder.as_mut());
             }
         }
 
@@ -459,7 +466,7 @@ impl PostingListDecoder for RangePostingList {
     }
 
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
-        self.next = target;
+        self.next = self.next.max(target);
         let start = self.next;
         if start >= self.range.end {
             return 0;
