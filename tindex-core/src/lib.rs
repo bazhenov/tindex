@@ -3,7 +3,7 @@
 
 use lazy_static::lazy_static;
 use std::{
-    ops::Range,
+    ops::{Index, Range},
     simd::{u64x4, usizex4, SimdPartialEq, ToBitMask},
 };
 
@@ -98,12 +98,8 @@ pub fn intersect(
     Intersect {
         a_decoder: Box::new(a),
         b_decoder: Box::new(b),
-        a_buffer: [0; 32],
-        a_position: 0,
-        a_capacity: 0,
-        b_buffer: [0; 32],
-        b_position: 0,
-        b_capacity: 0,
+        a: Buffer::<32>::default(),
+        b: Buffer::<32>::default(),
     }
     .into()
 }
@@ -220,45 +216,79 @@ impl PostingListDecoder for Merge {
         i
     }
 }
+#[derive(Debug)]
+struct Buffer<const N: usize> {
+    buffer: [u64; N],
+    pos: usize,
+    capacity: usize,
+}
+
+impl<const N: usize> Default for Buffer<N> {
+    fn default() -> Self {
+        Self {
+            buffer: [0; N],
+            pos: 0,
+            capacity: 0,
+        }
+    }
+}
+
+impl<const N: usize> Buffer<N> {
+    fn items_left(&self) -> usize {
+        self.capacity - self.pos
+    }
+
+    fn refill(&mut self, decoder: &mut dyn PostingListDecoder) -> usize {
+        let items_left = self.items_left();
+        if items_left > 0 {
+            self.buffer.copy_within(self.pos..self.capacity, 0);
+        }
+        let len = decoder.next_batch(&mut self.buffer[items_left..]);
+        self.capacity = len + items_left;
+        self.pos = 0;
+        if self.capacity < N {
+            self.buffer[self.capacity..].fill(0);
+        }
+        self.capacity
+    }
+}
+
+// impl<const N: usize> Index<usize> for Buffer<N> {
+//     type Output = u64;
+
+//     fn index(&self, index: usize) -> &Self::Output {
+//         &self.buffer[index]
+//     }
+// }
 
 pub struct Intersect {
     a_decoder: Box<dyn PostingListDecoder>,
     b_decoder: Box<dyn PostingListDecoder>,
-    a_buffer: [u64; 32],
-    a_position: usize,
-    a_capacity: usize,
-    b_buffer: [u64; 32],
-    b_position: usize,
-    b_capacity: usize,
+    a: Buffer<32>,
+    b: Buffer<32>,
 }
 
 impl PostingListDecoder for Intersect {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        assert!(
-            buffer.len() >= 4,
-            "Buffer should be at least 4 elements long"
-        );
         let mut buffer_pos = 0;
 
-        if self.a_position >= self.a_capacity {
-            self.a_buffer.fill(0);
-            self.a_capacity = self.a_decoder.next_batch(&mut self.a_buffer);
-            self.a_position = 0;
+        const LANES: usize = 4;
+
+        if self.a.items_left() == 0 {
+            self.a.refill(self.a_decoder.as_mut());
         }
-        if self.b_position >= self.b_capacity {
-            self.b_buffer.fill(0);
-            self.b_capacity = self.b_decoder.next_batch(&mut self.b_buffer);
-            self.b_position = 0;
+        if self.b.items_left() == 0 {
+            self.b.refill(self.b_decoder.as_mut());
         }
 
-        while buffer_pos + 4 < buffer.len()
-            && self.a_position + 4 < self.a_capacity
-            && self.b_position + 4 < self.b_capacity
+        while buffer_pos + LANES < buffer.len()
+            && self.a.items_left() >= LANES
+            && self.b.items_left() >= LANES
         {
-            let a: &[u64; 4] = self.a_buffer[self.a_position..self.a_position + 4]
+            let a: &[u64; LANES] = self.a.buffer[self.a.pos..self.a.pos + LANES]
                 .try_into()
                 .unwrap();
-            let b: &[u64; 4] = self.b_buffer[self.b_position..self.b_position + 4]
+            let b: &[u64; LANES] = self.b.buffer[self.b.pos..self.b.pos + LANES]
                 .try_into()
                 .unwrap();
 
@@ -285,48 +315,15 @@ impl PostingListDecoder for Intersect {
             // dbg!(&mask_idx);
             // dbg!(reverse4bits(mask_idx as u8));
 
-            // let mut match_idx = 0;
-            // while buffer_idx < buffer.len() && match_idx < a.len() {
-            //     if a[match_idx] == 0 {
-            //         break;
-            //     }
-            //     if matches[match_idx] > 0 {
-            //         buffer[buffer_idx] = a[match_idx];
-            //         buffer_idx += 1;
-            //     }
-            //     match_idx += 1;
-            // }
-
-            // while match_idx < a.len() && match_idx < a.len() {
-            //     if a[match_idx] == 0 {
-            //         break;
-            //     }
-            //     if matches[match_idx] {
-            //         stash[*stash_idx] = a[match_idx];
-            //         *stash_idx += 1;
-            //     }
-            //     match_idx += 1;
-            // }
-
             if a.last().unwrap() < b.last().unwrap() {
-                if self.a_position + 4 < self.a_capacity {
-                    self.a_position += 4;
-                } else {
-                    self.a_buffer.fill(0);
-                    if self.a_decoder.next_batch_advance(b[0], &mut self.a_buffer) == 0 {
-                        return 0;
-                    }
-                    self.a_position = 0;
+                self.a.pos += LANES;
+                if self.a.items_left() < LANES {
+                    self.a.refill(self.a_decoder.as_mut());
                 }
             } else {
-                if self.b_position + 4 < self.b_capacity {
-                    self.b_position += 4;
-                } else {
-                    self.b_buffer.fill(0);
-                    if self.b_decoder.next_batch_advance(a[0], &mut self.b_buffer) == 0 {
-                        return 0;
-                    }
-                    self.b_position = 0;
+                self.b.pos += LANES;
+                if self.b.items_left() < LANES {
+                    self.b.refill(self.b_decoder.as_mut());
                 }
             };
         }
@@ -339,32 +336,28 @@ impl PostingListDecoder for Intersect {
 
         // dbg!(buffer_pos);
 
-        while self.a_position < self.a_capacity
-            && self.b_position < self.b_capacity
-            && buffer_pos < buffer.len()
-        {
-            let a = self.a_buffer[self.a_position];
-            let b = self.b_buffer[self.b_position];
+        // dbg!(&self.a);
+        // dbg!(&self.b);
+
+        while self.a.items_left() > 0 && self.b.items_left() > 0 && buffer_pos < buffer.len() {
+            let a = self.a.buffer[self.a.pos];
+            let b = self.b.buffer[self.b.pos];
 
             if a == b {
                 buffer[buffer_pos] = a;
-                self.a_position += 1;
-                self.b_position += 1;
+                self.a.pos += 1;
+                self.b.pos += 1;
                 buffer_pos += 1;
             } else if a < b {
-                self.a_position += 1;
+                self.a.pos += 1;
             } else {
-                self.b_position += 1;
+                self.b.pos += 1;
             }
-            if self.a_position >= self.a_capacity {
-                self.a_buffer.fill(0);
-                self.a_capacity = self.a_decoder.next_batch(&mut self.a_buffer);
-                self.a_position = 0;
+            if self.a.items_left() == 0 {
+                self.a.refill(self.a_decoder.as_mut());
             }
-            if self.b_position >= self.b_capacity {
-                self.b_buffer.fill(0);
-                self.b_capacity = self.b_decoder.next_batch(&mut self.b_buffer);
-                self.b_position = 0;
+            if self.b.items_left() == 0 {
+                self.b.refill(self.b_decoder.as_mut());
             }
         }
 
