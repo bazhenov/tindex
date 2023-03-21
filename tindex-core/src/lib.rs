@@ -3,11 +3,6 @@
 
 use lazy_static::lazy_static;
 use std::{
-    arch::x86_64::{
-        _mm256_alignr_epi64, _mm256_cmpeq_epi64, _mm256_loadu_epi64, _mm256_movemask_epi8,
-        _mm256_or_epi64,
-    },
-    hint::black_box,
     ops::Range,
     simd::{u64x4, usizex4, SimdPartialEq, ToBitMask},
 };
@@ -22,20 +17,20 @@ mod prelude {
 lazy_static! {
     static ref MASKS: [(usize, usizex4); 16] = [
         (0, usizex4::from([4, 4, 4, 4])), // 0000 - 0
-        (1, usizex4::from([0, 4, 4, 4])), // 1000 - 1
-        (1, usizex4::from([4, 0, 4, 4])), // 0100 - 2
-        (2, usizex4::from([0, 1, 4, 4])), // 1100 - 3
-        (1, usizex4::from([4, 4, 0, 4])), // 0010 - 4
-        (2, usizex4::from([0, 4, 1, 4])), // 1010 - 5
+        (1, usizex4::from([4, 4, 4, 0])), // 0001 - 1
+        (1, usizex4::from([4, 4, 0, 4])), // 0010 - 2
+        (2, usizex4::from([4, 4, 0, 1])), // 0011 - 3
+        (1, usizex4::from([4, 0, 4, 4])), // 0100 - 4
+        (2, usizex4::from([4, 0, 4, 1])), // 0101 - 5
         (2, usizex4::from([4, 0, 1, 4])), // 0110 - 6
-        (3, usizex4::from([0, 1, 2, 4])), // 1110 - 7
-        (1, usizex4::from([4, 4, 4, 0])), // 0001 - 8
+        (3, usizex4::from([4, 0, 1, 2])), // 0111 - 7
+        (1, usizex4::from([0, 4, 4, 4])), // 1000 - 8
         (2, usizex4::from([0, 4, 4, 1])), // 1001 - 9
-        (2, usizex4::from([4, 0, 4, 1])), // 0101 - 10
-        (3, usizex4::from([0, 1, 4, 2])), // 1101 - 11
-        (2, usizex4::from([4, 4, 0, 1])), // 0011 - 12
-        (3, usizex4::from([0, 4, 1, 2])), // 1011 - 13
-        (3, usizex4::from([4, 0, 1, 2])), // 0111 - 14
+        (2, usizex4::from([0, 4, 1, 4])), // 1010 - 10
+        (3, usizex4::from([0, 4, 1, 2])), // 1011 - 11
+        (2, usizex4::from([0, 1, 4, 4])), // 1100 - 12
+        (3, usizex4::from([0, 1, 4, 2])), // 1101 - 13
+        (3, usizex4::from([0, 1, 2, 4])), // 1110 - 14
         (4, usizex4::from([0, 1, 2, 3])), // 1111 - 15
     ];
 
@@ -100,7 +95,17 @@ pub fn intersect(
     a: impl PostingListDecoder + 'static,
     b: impl PostingListDecoder + 'static,
 ) -> Intersect {
-    Intersect(Box::new(a), Box::new(b), [0; 8], 0).into()
+    Intersect {
+        a_decoder: Box::new(a),
+        b_decoder: Box::new(b),
+        a_buffer: [0; 32],
+        a_position: 0,
+        a_capacity: 0,
+        b_buffer: [0; 32],
+        b_position: 0,
+        b_capacity: 0,
+    }
+    .into()
 }
 
 pub fn merge(a: PostingList, b: PostingList) -> PostingList {
@@ -216,75 +221,69 @@ impl PostingListDecoder for Merge {
     }
 }
 
-pub struct Intersect(
-    Box<dyn PostingListDecoder>,
-    Box<dyn PostingListDecoder>,
-    pub [u64; 8],
-    pub usize,
-);
+pub struct Intersect {
+    a_decoder: Box<dyn PostingListDecoder>,
+    b_decoder: Box<dyn PostingListDecoder>,
+    a_buffer: [u64; 32],
+    a_position: usize,
+    a_capacity: usize,
+    b_buffer: [u64; 32],
+    b_position: usize,
+    b_capacity: usize,
+}
 
 impl PostingListDecoder for Intersect {
     fn next_batch(&mut self, buffer: &mut PlBuffer) -> usize {
-        let mut buffer_idx = 0;
-        let stash = &mut self.2;
-        let stash_idx = &mut self.3;
+        assert!(
+            buffer.len() >= 4,
+            "Buffer should be at least 4 elements long"
+        );
+        let mut buffer_pos = 0;
 
-        let masks = &MASKS;
-
-        while *stash_idx > 0 && buffer_idx < buffer.len() {
-            buffer[buffer_idx] = stash[*stash_idx];
-            *stash_idx -= 1;
-            buffer_idx += 1;
+        if self.a_position >= self.a_capacity {
+            self.a_buffer.fill(0);
+            self.a_capacity = self.a_decoder.next_batch(&mut self.a_buffer);
+            self.a_position = 0;
+        }
+        if self.b_position >= self.b_capacity {
+            self.b_buffer.fill(0);
+            self.b_capacity = self.b_decoder.next_batch(&mut self.b_buffer);
+            self.b_position = 0;
         }
 
-        if buffer_idx == buffer.len() {
-            return buffer.len();
-        }
+        while buffer_pos + 4 < buffer.len()
+            && self.a_position + 4 < self.a_capacity
+            && self.b_position + 4 < self.b_capacity
+        {
+            let a: &[u64; 4] = self.a_buffer[self.a_position..self.a_position + 4]
+                .try_into()
+                .unwrap();
+            let b: &[u64; 4] = self.b_buffer[self.b_position..self.b_position + 4]
+                .try_into()
+                .unwrap();
 
-        let mut A = [0; 32];
-        let mut B = [0; 32];
-        let mut a_pos = 0;
-        let mut b_pos = 0;
+            // dbg!(a);
+            // dbg!(b);
 
-        // a.fill(0);
-        let a_read = self.0.next_batch(&mut A);
-        // b.fill(0);
-        let b_read = self.1.next_batch(&mut B);
-
-        if a_read < A.len() || b_read < B.len() {
-            return 0;
-        }
-
-        while buffer_idx + 4 < buffer.len() {
-            let a: &[u64; 4] = A[a_pos..a_pos + 4].try_into().unwrap();
-            let b: &[u64; 4] = B[b_pos..b_pos + 4].try_into().unwrap();
-
-            let mask_idx = unsafe {
-                let a = _mm256_loadu_epi64(a.as_ptr() as *const i64);
-                let b = _mm256_loadu_epi64(b.as_ptr() as *const i64);
-
-                let r0 = _mm256_alignr_epi64(b, b, 0);
-                let r1 = _mm256_alignr_epi64(b, b, 1);
-                let r2 = _mm256_alignr_epi64(b, b, 2);
-                let r3 = _mm256_alignr_epi64(b, b, 3);
-
-                let mask1 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r0), _mm256_cmpeq_epi64(a, r1));
-                let mask2 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r2), _mm256_cmpeq_epi64(a, r3));
-                let mask = _mm256_or_epi64(mask1, mask2);
-                let mask = _mm256_movemask_epi8(mask);
-                ((mask >> 31) & 1) << 3
-                    | ((mask >> 23) & 1) << 2
-                    | ((mask >> 15) & 1) << 1
-                    | ((mask >> 7) & 1) << 0
-            };
-            black_box(mask_idx);
-
-            // TODO replace code with pshufb/scatter
-            // let mask_idx = mask.to_bitmask() as usize;
             let a_simd = u64x4::from(*a);
-            let (len, mask) = masks[mask_idx as usize];
-            a_simd.scatter(&mut buffer[buffer_idx..buffer_idx + 4], mask);
-            buffer_idx += LENGTHS[mask_idx as usize];
+            let b_simd = u64x4::from(*b);
+            let r0 = b_simd.rotate_lanes_left::<0>();
+            let r1 = b_simd.rotate_lanes_left::<1>();
+            let r2 = b_simd.rotate_lanes_left::<2>();
+            let r3 = b_simd.rotate_lanes_left::<3>();
+
+            let mask =
+                a_simd.simd_eq(r0) | a_simd.simd_eq(r1) | a_simd.simd_eq(r2) | a_simd.simd_eq(r3);
+
+            let mask_idx = reverse4bits(mask.to_bitmask()) as usize;
+            // dbg!(&mask.to_array());
+            let (len, mask) = MASKS[mask_idx];
+            a_simd.scatter(&mut buffer[buffer_pos..buffer_pos + 4], mask);
+            buffer_pos += len;
+            // dbg!(len);
+            // dbg!(&buffer);
+            // dbg!(&mask_idx);
+            // dbg!(reverse4bits(mask_idx as u8));
 
             // let mut match_idx = 0;
             // while buffer_idx < buffer.len() && match_idx < a.len() {
@@ -310,29 +309,74 @@ impl PostingListDecoder for Intersect {
             // }
 
             if a.last().unwrap() < b.last().unwrap() {
-                if a_pos + 4 < A.len() {
-                    a_pos += 4;
+                if self.a_position + 4 < self.a_capacity {
+                    self.a_position += 4;
                 } else {
-                    if self.0.next_batch_advance(b[0], &mut A) == 0 {
+                    self.a_buffer.fill(0);
+                    if self.a_decoder.next_batch_advance(b[0], &mut self.a_buffer) == 0 {
                         return 0;
                     }
-                    a_pos = 0;
+                    self.a_position = 0;
                 }
-                // a.fill(0);
             } else {
-                // b.fill(0);
-                if b_pos + 4 < B.len() {
-                    b_pos += 4;
+                if self.b_position + 4 < self.b_capacity {
+                    self.b_position += 4;
                 } else {
-                    if self.0.next_batch_advance(a[0], &mut B) == 0 {
+                    self.b_buffer.fill(0);
+                    if self.b_decoder.next_batch_advance(a[0], &mut self.b_buffer) == 0 {
                         return 0;
                     }
-                    b_pos = 0;
+                    self.b_position = 0;
                 }
             };
         }
-        return buffer_idx;
+
+        // dbg!(&buffer);
+        // dbg!(self.a_buffer);
+        // dbg!((self.a_position, self.a_capacity));
+        // dbg!(self.b_buffer);
+        // dbg!((self.b_position, self.b_capacity));
+
+        // dbg!(buffer_pos);
+
+        while self.a_position < self.a_capacity
+            && self.b_position < self.b_capacity
+            && buffer_pos < buffer.len()
+        {
+            let a = self.a_buffer[self.a_position];
+            let b = self.b_buffer[self.b_position];
+
+            if a == b {
+                buffer[buffer_pos] = a;
+                self.a_position += 1;
+                self.b_position += 1;
+                buffer_pos += 1;
+            } else if a < b {
+                self.a_position += 1;
+            } else {
+                self.b_position += 1;
+            }
+            if self.a_position >= self.a_capacity {
+                self.a_buffer.fill(0);
+                self.a_capacity = self.a_decoder.next_batch(&mut self.a_buffer);
+                self.a_position = 0;
+            }
+            if self.b_position >= self.b_capacity {
+                self.b_buffer.fill(0);
+                self.b_capacity = self.b_decoder.next_batch(&mut self.b_buffer);
+                self.b_position = 0;
+            }
+        }
+
+        return buffer_pos;
     }
+}
+
+fn reverse4bits(mut b: u8) -> u8 {
+    // b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+    b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+    b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
+    return b;
 }
 
 pub struct Exclude(pub PostingList, pub PostingList);
@@ -446,7 +490,6 @@ mod tests {
     use std::panic;
     use std::panic::RefUnwindSafe;
     use std::simd::u64x4;
-    use std::simd::usizex4;
     use std::simd::SimdPartialEq;
 
     #[test]
@@ -502,12 +545,12 @@ mod tests {
 
     #[test]
     fn check_intersect_massive() {
-        // let seed = [
-        //     38, 249, 210, 60, 25, 139, 148, 27, 43, 55, 72, 59, 118, 36, 26, 1, 237, 60, 144, 244,
-        //     23, 87, 77, 245, 98, 164, 9, 25, 117, 242, 86, 74,
-        // ];
+        let seed = [
+            71, 254, 118, 3, 30, 11, 164, 87, 231, 202, 4, 94, 71, 208, 178, 90, 154, 191, 156, 19,
+            227, 117, 204, 5, 140, 4, 214, 103, 117, 121, 139, 150,
+        ];
         run_seeded_test::<StdRng>(None, |mut rng| {
-            for _ in 0..100 {
+            for _ in 0..1000 {
                 let a = random_posting_list(&mut rng);
                 let b = random_posting_list(&mut rng);
 
@@ -602,12 +645,12 @@ mod tests {
     }
 
     fn random_posting_list(rng: &mut impl Rng) -> VecPostingList {
-        let size: usize = rng.gen_range(1..20);
+        let size: usize = rng.gen_range(1..50);
         let mut list = Vec::with_capacity(size);
 
         let mut doc_id = 0;
         for _ in 0..size {
-            doc_id += rng.gen_range(1..1000);
+            doc_id += rng.gen_range(1..5);
             list.push(doc_id)
         }
         VecPostingList::new(&list)
@@ -629,52 +672,10 @@ mod tests {
     }
 
     #[test]
-    fn check_simd_intrinsic_load_store() {
-        unsafe {
-            let a = _mm256_loadu_epi64([1u64, 2, 3, 4].as_ptr() as *const i64);
-            let b = _mm256_loadu_epi64([2u64, 3, 6, 8].as_ptr() as *const i64);
-
-            let r0 = _mm256_alignr_epi64(b, b, 0);
-            let r1 = _mm256_alignr_epi64(b, b, 1);
-            let r2 = _mm256_alignr_epi64(b, b, 2);
-            let r3 = _mm256_alignr_epi64(b, b, 3);
-
-            let mask1 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r0), _mm256_cmpeq_epi64(a, r1));
-            let mask2 = _mm256_or_epi64(_mm256_cmpeq_epi64(a, r2), _mm256_cmpeq_epi64(a, r3));
-            let mask = _mm256_or_epi64(mask1, mask2);
-            let mask = _mm256_movemask_epi8(mask);
-            let mask = ((mask >> 31) & 1) << 3
-                | ((mask >> 23) & 1) << 2
-                | ((mask >> 15) & 1) << 1
-                | ((mask >> 7) & 1) << 0;
-
-            assert_eq!(6, mask);
-        }
-    }
-
-    #[test]
     fn check_simd_scatter() {
         let a = u64x4::from([1, 2, 3, 4]);
-        let masks: [(usize, usizex4); 16] = [
-            (0, usizex4::from([4, 4, 4, 4])), // 0000
-            (1, usizex4::from([4, 4, 4, 0])), // 0001
-            (1, usizex4::from([4, 4, 0, 4])), // 0010
-            (2, usizex4::from([4, 4, 0, 1])), // 0011
-            (1, usizex4::from([4, 0, 4, 4])), // 0100
-            (2, usizex4::from([4, 0, 4, 1])), // 0101
-            (2, usizex4::from([4, 0, 1, 4])), // 0110
-            (3, usizex4::from([4, 0, 1, 2])), // 0111
-            (1, usizex4::from([0, 4, 4, 4])), // 1000
-            (2, usizex4::from([0, 4, 4, 1])), // 1001
-            (2, usizex4::from([0, 4, 1, 4])), // 1010
-            (3, usizex4::from([0, 4, 1, 2])), // 1011
-            (2, usizex4::from([0, 1, 4, 4])), // 1100
-            (3, usizex4::from([0, 1, 4, 2])), // 1101
-            (3, usizex4::from([0, 1, 2, 4])), // 1110
-            (4, usizex4::from([0, 1, 2, 3])), // 1111
-        ];
         let mut output = [0u64; 4];
-        let (len, mask) = &masks[5];
+        let (len, mask) = &MASKS[5]; // 0101
         a.scatter(&mut output, *mask);
         assert_eq!(*len, 2);
         assert_eq!(output, [2, 4, 0, 0]);
