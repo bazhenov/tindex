@@ -3,7 +3,7 @@
 
 use lazy_static::lazy_static;
 use std::{
-    ops::{Index, Range},
+    ops::Range,
     simd::{u64x4, usizex4, SimdPartialEq, ToBitMask},
 };
 
@@ -311,8 +311,8 @@ impl PostingListDecoder for Intersect {
             // dbg!(a_max);
             // dbg!(b_max);
 
-            let a_max = self.a.buffer[self.a.pos + LANES - 1];
-            let b_max = self.b.buffer[self.b.pos + LANES - 1];
+            let a_max = a_simd[LANES - 1];
+            let b_max = b_simd[LANES - 1];
             if a_max <= b_max {
                 self.a.pos += LANES;
                 if self.a.items_left() < LANES {
@@ -357,13 +357,6 @@ impl PostingListDecoder for Intersect {
 
         return buffer_pos;
     }
-}
-
-fn reverse4bits(mut b: u8) -> u8 {
-    // b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
-    b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
-    b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
-    return b;
 }
 
 pub struct Exclude(pub PostingList, pub PostingList);
