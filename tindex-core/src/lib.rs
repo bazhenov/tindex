@@ -15,26 +15,26 @@ mod prelude {
 }
 
 lazy_static! {
-    static ref MASKS: [(usize, usizex4); 16] = [
-        (0, usizex4::from([4, 4, 4, 4])), // 0000 - 0
-        (1, usizex4::from([0, 4, 4, 4])), // 1000 - 1
-        (1, usizex4::from([4, 0, 4, 4])), // 0100 - 2
-        (2, usizex4::from([0, 1, 4, 4])), // 1100 - 3
-        (1, usizex4::from([4, 4, 0, 4])), // 0010 - 4
-        (2, usizex4::from([0, 4, 1, 4])), // 1010 - 5
-        (2, usizex4::from([4, 0, 1, 4])), // 0110 - 6
-        (3, usizex4::from([0, 1, 2, 4])), // 1110 - 7
-        (1, usizex4::from([4, 4, 4, 0])), // 0001 - 8
-        (2, usizex4::from([0, 4, 4, 1])), // 1001 - 9
-        (2, usizex4::from([4, 0, 4, 1])), // 0101 - 10
-        (3, usizex4::from([0, 1, 4, 2])), // 1101 - 11
-        (2, usizex4::from([4, 4, 0, 1])), // 0011 - 12
-        (3, usizex4::from([0, 4, 1, 2])), // 1011 - 13
-        (3, usizex4::from([4, 0, 1, 2])), // 0111 - 14
-        (4, usizex4::from([0, 1, 2, 3])), // 1111 - 15
+    static ref MASKS: [usizex4; 16] = [
+        usizex4::from([4, 4, 4, 4]), // 0000 - 0
+        usizex4::from([0, 4, 4, 4]), // 1000 - 1
+        usizex4::from([4, 0, 4, 4]), // 0100 - 2
+        usizex4::from([0, 1, 4, 4]), // 1100 - 3
+        usizex4::from([4, 4, 0, 4]), // 0010 - 4
+        usizex4::from([0, 4, 1, 4]), // 1010 - 5
+        usizex4::from([4, 0, 1, 4]), // 0110 - 6
+        usizex4::from([0, 1, 2, 4]), // 1110 - 7
+        usizex4::from([4, 4, 4, 0]), // 0001 - 8
+        usizex4::from([0, 4, 4, 1]), // 1001 - 9
+        usizex4::from([4, 0, 4, 1]), // 0101 - 10
+        usizex4::from([0, 1, 4, 2]), // 1101 - 11
+        usizex4::from([4, 4, 0, 1]), // 0011 - 12
+        usizex4::from([0, 4, 1, 2]), // 1011 - 13
+        usizex4::from([4, 0, 1, 2]), // 0111 - 14
+        usizex4::from([0, 1, 2, 3]), // 1111 - 15
     ];
 
-    static ref LENGTHS: [usize; 16] = [
+    static ref LENGTHS: [u8; 16] = [
         0,
         1,
         1,
@@ -303,9 +303,9 @@ impl PostingListDecoder for Intersect {
 
             let mask_idx = mask.to_bitmask();
             if mask_idx > 0 {
-                let (len, mask) = MASKS[mask_idx as usize];
+                let mask = MASKS[mask_idx as usize];
                 a_simd.scatter(&mut buffer[buffer_pos..buffer_pos + LANES], mask);
-                buffer_pos += len;
+                buffer_pos += mask_idx.count_ones() as usize;
             }
 
             // dbg!(a_max);
@@ -655,9 +655,8 @@ mod tests {
     fn check_simd_scatter() {
         let a = u64x4::from([1, 2, 3, 4]);
         let mut output = [0u64; 4];
-        let (len, mask) = &MASKS[10]; // 0101
-        a.scatter(&mut output, *mask);
-        assert_eq!(*len, 2);
+        let mask = MASKS[10]; // 0101
+        a.scatter(&mut output, mask);
         assert_eq!(output, [2, 4, 0, 0]);
     }
 }

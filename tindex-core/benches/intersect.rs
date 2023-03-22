@@ -109,6 +109,7 @@ pub fn posting_list_traverse(c: &mut Criterion) {
     });
 }
 
+#[inline]
 fn traverse(mut input: PostingList) {
     while input.next() != NO_DOC {}
 }
