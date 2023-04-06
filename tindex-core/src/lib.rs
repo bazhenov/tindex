@@ -427,8 +427,11 @@ pub struct RangePostingList {
 
 impl RangePostingList {
     pub fn new(range: Range<u64>) -> Self {
-        if range.start == NO_DOC {
+        if range.start == 0 {
             panic!("Start should be greater than zero");
+        }
+        if range.start == NO_DOC {
+            panic!("Start should be less tahn NO_DOC const");
         }
         let next = range.start;
         Self { range, next }
@@ -446,16 +449,80 @@ impl PostingListDecoder for RangePostingList {
     }
 
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        const PREFIX_SUM: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
         self.next = self.next.max(target);
-        let start = self.next;
+        let mut start = self.next;
         if start >= self.range.end {
             return 0;
         }
         let len = buffer.len().min((self.range.end - start) as usize);
-        for (i, item) in buffer[..len].iter_mut().enumerate() {
-            *item = start + i as u64;
-        }
         self.next += len as u64;
+
+        let mut len_cnt = len;
+
+        let mut offset = 0;
+
+        // ~3Gelem/s
+        // for (i, item) in buffer.iter_mut().enumerate() {
+        //     *item = start + i as u64;
+        // }
+
+        // ~3Gelem/s
+        // for chunk in buffer.chunks_mut(PREFIX_SUM.len()) {
+        //     for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
+        //         *i = start + add;
+        //     }
+        //     start += PREFIX_SUM.len() as u64;
+        // }
+
+        // 3.57Gelem/s
+        // for chunk in buffer.chunks_mut(PREFIX_SUM.len()) {
+        //     if chunk.len() == PREFIX_SUM.len() {
+        //         for i in 0..PREFIX_SUM.len() {
+        //             chunk[i] = start + PREFIX_SUM[i];
+        //         }
+        //     } else {
+        //         for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
+        //             *i = start + add;
+        //         }
+        //     }
+        //     start += PREFIX_SUM.len() as u64;
+        // }
+
+        // 4.15 Gelem/s
+        for chunk in buffer.chunks_mut(PREFIX_SUM.len()) {
+            // This code duplication is required for compiler to vectorize code
+            if chunk.len() == PREFIX_SUM.len() {
+                for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
+                    *i = start + add;
+                }
+            } else {
+                for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
+                    *i = start + add;
+                }
+            }
+            start += PREFIX_SUM.len() as u64;
+        }
+
+        // while len_cnt >= PREFIX_SUM.len() {
+        //     // This code doesn't vectorize
+        //     // for i in 0..PREFIX_SUM.len() {
+        //     //     buffer[offset + i] = start + PREFIX_SUM[i];
+        //     // }
+        //     for (i, item) in buffer[offset..offset + PREFIX_SUM.len()]
+        //         .iter_mut()
+        //         .enumerate()
+        //     {
+        //         *item = start + PREFIX_SUM[i];
+        //     }
+        //     offset += PREFIX_SUM.len();
+        //     start += PREFIX_SUM.len() as u64;
+        //     len_cnt -= PREFIX_SUM.len();
+        // }
+        // for (o, item) in buffer.iter_mut().skip(offset).enumerate() {
+        //     *item = o as u64 + start;
+        // }
         len
     }
 }
@@ -658,5 +725,18 @@ mod tests {
         let mask = MASKS[10]; // 0101
         a.scatter(&mut output, mask);
         assert_eq!(output, [2, 4, 0, 0]);
+    }
+
+    #[test]
+    fn check_range_posting_list() {
+        for i in 2..100 {
+            let pl = RangePostingList::new(1..i);
+            let vec = pl.to_vec();
+            dbg!(i);
+            dbg!(&vec);
+            let sum: u64 = vec.iter().sum();
+
+            assert_eq!(sum, (i - 1) * i / 2);
+        }
     }
 }
