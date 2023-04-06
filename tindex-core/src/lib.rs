@@ -3,8 +3,8 @@
 
 use lazy_static::lazy_static;
 use std::{
-    ops::Range,
-    simd::{u64x4, usizex4, SimdPartialEq, ToBitMask},
+    ops::{AddAssign, Range},
+    simd::{u64x4, u64x8, usizex4, SimdPartialEq, ToBitMask},
 };
 
 pub mod encoding;
@@ -449,8 +449,7 @@ impl PostingListDecoder for RangePostingList {
     }
 
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
-        const PREFIX_SUM: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-
+        const PREFIX_SUM: [u64; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
         self.next = self.next.max(target);
         let mut start = self.next;
         if start >= self.range.end {
@@ -458,10 +457,6 @@ impl PostingListDecoder for RangePostingList {
         }
         let len = buffer.len().min((self.range.end - start) as usize);
         self.next += len as u64;
-
-        let mut len_cnt = len;
-
-        let mut offset = 0;
 
         // ~3Gelem/s
         // for (i, item) in buffer.iter_mut().enumerate() {
@@ -491,18 +486,40 @@ impl PostingListDecoder for RangePostingList {
         // }
 
         // 4.15 Gelem/s
-        for chunk in buffer.chunks_mut(PREFIX_SUM.len()) {
+        // const STRIDE_LENGTH: usize = 16;
+        // for chunk in buffer.chunks_mut(STRIDE_LENGTH) {
+        //     // This code duplication is required for compiler to vectorize code
+        //     if chunk.len() == STRIDE_LENGTH {
+        //         for (i, add) in chunk.iter_mut().zip(0..STRIDE_LENGTH) {
+        //             *i = start + add as u64;
+        //         }
+        //     } else {
+        //         for (i, add) in chunk.iter_mut().zip(0..STRIDE_LENGTH) {
+        //             *i = start + add as u64;
+        //         }
+        //     }
+        //     start += PREFIX_SUM.len() as u64;
+        // }
+
+        // 4.5 Gelem/s
+        const STRIDE_LENGTH: usize = PREFIX_SUM.len() * 2;
+        let progression = u64x8::from_array(PREFIX_SUM);
+        for chunk in buffer[..len].chunks_mut(STRIDE_LENGTH) {
             // This code duplication is required for compiler to vectorize code
-            if chunk.len() == PREFIX_SUM.len() {
-                for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
-                    *i = start + add;
-                }
+            // dbg!(chunk.len());
+            if chunk.len() == STRIDE_LENGTH {
+                let simd_a = u64x8::splat(start) + progression;
+                let simd_b =
+                    u64x8::splat(start) + u64x8::splat(STRIDE_LENGTH as u64 / 2) + progression;
+                chunk[0..STRIDE_LENGTH / 2].copy_from_slice(simd_a.as_array());
+                chunk[STRIDE_LENGTH / 2..].copy_from_slice(simd_b.as_array());
             } else {
-                for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
-                    *i = start + add;
+                for (item, add) in chunk.iter_mut().zip(0..STRIDE_LENGTH) {
+                    *item = start + add as u64;
+                    // dbg!(item);
                 }
             }
-            start += PREFIX_SUM.len() as u64;
+            start += STRIDE_LENGTH as u64;
         }
 
         // while len_cnt >= PREFIX_SUM.len() {
