@@ -1,9 +1,10 @@
 #![feature(portable_simd)]
 #![feature(stdsimd)]
+#![feature(slice_as_chunks)]
 
 use lazy_static::lazy_static;
 use std::{
-    ops::{AddAssign, Range},
+    ops::{AddAssign, Range, Shr, ShrAssign},
     simd::{u64x4, u64x8, usizex4, SimdPartialEq, ToBitMask},
 };
 
@@ -421,8 +422,8 @@ impl PostingListDecoder for VecPostingList {
 
 #[derive(Clone)]
 pub struct RangePostingList {
-    range: Range<u64>,
     next: u64,
+    end: u64,
 }
 
 impl RangePostingList {
@@ -434,13 +435,194 @@ impl RangePostingList {
             panic!("Start should be less tahn NO_DOC const");
         }
         let next = range.start;
-        Self { range, next }
+        let end = range.end;
+        Self { next, end }
     }
 
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u64 {
-        self.range.end - self.range.start
+        self.end - self.next
     }
+}
+
+#[inline]
+fn next_batch_scalar(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    pl.next = pl.next.max(target);
+    let start = pl.next;
+    if start >= pl.end {
+        return 0;
+    }
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+    for i in 0..len {
+        buffer[i] = pl.next;
+        pl.next += 1;
+    }
+    len
+}
+
+#[inline]
+fn next_batch_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    pl.next = pl.next.max(target);
+    if pl.next >= pl.end {
+        return 0;
+    }
+
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    for (i, item) in buffer[..len].iter_mut().enumerate() {
+        *item = pl.next + i as u64;
+    }
+
+    pl.next += len as u64;
+
+    len
+}
+
+#[inline]
+fn next_batch_v3(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    pl.next = pl.next.max(target);
+    if pl.next >= pl.end {
+        return 0;
+    }
+
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    for chunk in buffer[..len].chunks_mut(16) {
+        for (i, item) in chunk.iter_mut().enumerate() {
+            *item = pl.next + i as u64;
+        }
+        pl.next += chunk.len() as u64;
+    }
+
+    len
+}
+
+#[inline]
+fn next_batch_v4(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    pl.next = pl.next.max(target);
+    if pl.next >= pl.end {
+        return 0;
+    }
+
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    for chunk in buffer[..len].chunks_mut(PROGRESSION.len()) {
+        if chunk.len() == PROGRESSION.len() {
+            for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
+                *item = pl.next + offset;
+            }
+        } else {
+            for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
+                *item = pl.next + offset;
+            }
+        }
+        pl.next += chunk.len() as u64;
+    }
+
+    len
+}
+
+#[inline]
+fn next_batch_v5(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    pl.next = pl.next.max(target);
+    if pl.next >= pl.end {
+        return 0;
+    }
+
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    let (chunks, remainder) = buffer[..len].as_chunks_mut::<16>();
+    for chunk in chunks {
+        for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
+            *item = pl.next + offset;
+        }
+        pl.next += chunk.len() as u64;
+    }
+
+    for (item, offset) in remainder.iter_mut().zip(PROGRESSION) {
+        *item = pl.next + offset;
+    }
+    pl.next += remainder.len() as u64;
+
+    len
+}
+
+#[inline]
+fn next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    pl.next = pl.next.max(target);
+    if pl.next >= pl.end {
+        return 0;
+    }
+
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
+    const LANES: usize = PROGRESSION.lanes();
+    const STRIDE: usize = PROGRESSION.lanes() * 2;
+    let lanes_offset = u64x8::splat(LANES as u64);
+
+    for chunk in buffer[..len].chunks_mut(STRIDE) {
+        // This code duplication is required for compiler to vectorize code
+        // at the moment slice::as_chunks_mut() producing slower code
+        if chunk.len() == STRIDE {
+            let v = u64x8::splat(pl.next) + PROGRESSION;
+            chunk[0..LANES].copy_from_slice(v.as_array());
+
+            let v = v + lanes_offset;
+            chunk[LANES..].copy_from_slice(v.as_array());
+        } else {
+            for (item, add) in chunk.iter_mut().zip(0..STRIDE) {
+                *item = pl.next + add as u64;
+            }
+        }
+        pl.next += chunk.len() as u64;
+    }
+
+    len
+}
+
+#[inline]
+fn next_batch_v7(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    pl.next = pl.next.max(target);
+    if pl.next >= pl.end {
+        return 0;
+    }
+
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
+    const LANES: usize = PROGRESSION.lanes();
+    const STRIDE: usize = PROGRESSION.lanes() * 2;
+    let lanes_offset = u64x8::splat(LANES as u64);
+
+    let (chunks, remainder) = buffer[..len].as_chunks_mut::<16>();
+
+    for chunk in chunks {
+        let v = u64x8::splat(pl.next) + PROGRESSION;
+        chunk[0..LANES].copy_from_slice(v.as_array());
+
+        let v = v + lanes_offset;
+        chunk[LANES..].copy_from_slice(v.as_array());
+
+        pl.next += chunk.len() as u64;
+    }
+
+    for (item, add) in remainder.iter_mut().zip(0..STRIDE) {
+        *item = pl.next + add as u64;
+    }
+
+    pl.next += remainder.len() as u64;
+
+    len
 }
 
 impl PostingListDecoder for RangePostingList {
@@ -449,98 +631,26 @@ impl PostingListDecoder for RangePostingList {
     }
 
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
-        const PREFIX_SUM: [u64; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
-        self.next = self.next.max(target);
-        let mut start = self.next;
-        if start >= self.range.end {
-            return 0;
-        }
-        let len = buffer.len().min((self.range.end - start) as usize);
-        self.next += len as u64;
+        // 1.65GElem/s
+        // next_batch_scalar(self, target, buffer)
 
-        // ~3Gelem/s
-        // for (i, item) in buffer.iter_mut().enumerate() {
-        //     *item = start + i as u64;
-        // }
+        // 1.79GElem/s
+        // next_batch_v2(self, target, buffer)
 
-        // ~3Gelem/s
-        // for chunk in buffer.chunks_mut(PREFIX_SUM.len()) {
-        //     for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
-        //         *i = start + add;
-        //     }
-        //     start += PREFIX_SUM.len() as u64;
-        // }
+        // 3.04GElem/s
+        // next_batch_v3(self, target, buffer)
 
-        // 3.57Gelem/s
-        // for chunk in buffer.chunks_mut(PREFIX_SUM.len()) {
-        //     if chunk.len() == PREFIX_SUM.len() {
-        //         for i in 0..PREFIX_SUM.len() {
-        //             chunk[i] = start + PREFIX_SUM[i];
-        //         }
-        //     } else {
-        //         for (i, add) in chunk.iter_mut().zip(PREFIX_SUM) {
-        //             *i = start + add;
-        //         }
-        //     }
-        //     start += PREFIX_SUM.len() as u64;
-        // }
+        // 3.74GElem/s
+        // next_batch_v4(self, target, buffer)
 
-        // 4.15 Gelem/s
-        // const STRIDE_LENGTH: usize = 16;
-        // for chunk in buffer.chunks_mut(STRIDE_LENGTH) {
-        //     // This code duplication is required for compiler to vectorize code
-        //     if chunk.len() == STRIDE_LENGTH {
-        //         for (i, add) in chunk.iter_mut().zip(0..STRIDE_LENGTH) {
-        //             *i = start + add as u64;
-        //         }
-        //     } else {
-        //         for (i, add) in chunk.iter_mut().zip(0..STRIDE_LENGTH) {
-        //             *i = start + add as u64;
-        //         }
-        //     }
-        //     start += PREFIX_SUM.len() as u64;
-        // }
+        // 3.52GElem/s using
+        // next_batch_v5(self, target, buffer)
 
-        // 4.5 Gelem/s
-        const STRIDE_LENGTH: usize = PREFIX_SUM.len() * 2;
-        let progression = u64x8::from_array(PREFIX_SUM);
-        for chunk in buffer[..len].chunks_mut(STRIDE_LENGTH) {
-            // This code duplication is required for compiler to vectorize code
-            // dbg!(chunk.len());
-            if chunk.len() == STRIDE_LENGTH {
-                let simd_a = u64x8::splat(start) + progression;
-                let simd_b =
-                    u64x8::splat(start) + u64x8::splat(STRIDE_LENGTH as u64 / 2) + progression;
-                chunk[0..STRIDE_LENGTH / 2].copy_from_slice(simd_a.as_array());
-                chunk[STRIDE_LENGTH / 2..].copy_from_slice(simd_b.as_array());
-            } else {
-                for (item, add) in chunk.iter_mut().zip(0..STRIDE_LENGTH) {
-                    *item = start + add as u64;
-                    // dbg!(item);
-                }
-            }
-            start += STRIDE_LENGTH as u64;
-        }
+        // 4.40GElem/s using
+        next_batch_v6(self, target, buffer)
 
-        // while len_cnt >= PREFIX_SUM.len() {
-        //     // This code doesn't vectorize
-        //     // for i in 0..PREFIX_SUM.len() {
-        //     //     buffer[offset + i] = start + PREFIX_SUM[i];
-        //     // }
-        //     for (i, item) in buffer[offset..offset + PREFIX_SUM.len()]
-        //         .iter_mut()
-        //         .enumerate()
-        //     {
-        //         *item = start + PREFIX_SUM[i];
-        //     }
-        //     offset += PREFIX_SUM.len();
-        //     start += PREFIX_SUM.len() as u64;
-        //     len_cnt -= PREFIX_SUM.len();
-        // }
-        // for (o, item) in buffer.iter_mut().skip(offset).enumerate() {
-        //     *item = o as u64 + start;
-        // }
-        len
+        // 4.20GElem/s using
+        // next_batch_v7(self, target, buffer)
     }
 }
 
