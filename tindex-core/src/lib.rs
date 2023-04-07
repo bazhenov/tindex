@@ -454,10 +454,12 @@ fn next_batch_scalar(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuff
     }
     let range_len = (pl.end - pl.next) as usize;
     let len = range_len.min(buffer.len());
+
     for i in 0..len {
         buffer[i] = pl.next;
         pl.next += 1;
     }
+
     len
 }
 
@@ -557,6 +559,45 @@ fn next_batch_v5(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 #[inline]
 fn next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
+    let start = pl.next;
+    if start >= pl.end {
+        return 0;
+    }
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    for i in buffer[..len].iter_mut() {
+        *i = pl.next;
+
+        pl.next += 1;
+    }
+
+    len
+}
+
+#[inline]
+fn next_batch_v7(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    pl.next = pl.next.max(target);
+    let start = pl.next;
+    if start >= pl.end {
+        return 0;
+    }
+    let range_len = (pl.end - pl.next) as usize;
+    let len = range_len.min(buffer.len());
+
+    for i in 0..len {
+        unsafe {
+            *buffer.get_unchecked_mut(i) = pl.next;
+        }
+        pl.next += 1;
+    }
+
+    len
+}
+
+#[inline]
+fn next_batch_simd(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+    pl.next = pl.next.max(target);
     if pl.next >= pl.end {
         return 0;
     }
@@ -566,21 +607,21 @@ fn next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 
     const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
     const LANES: usize = PROGRESSION.lanes();
-    const STRIDE: usize = PROGRESSION.lanes() * 2;
     let lanes_offset = u64x8::splat(LANES as u64);
 
-    for chunk in buffer[..len].chunks_mut(STRIDE) {
+    for chunk in buffer[..len].chunks_mut(LANES * 2) {
         // This code duplication is required for compiler to vectorize code
         // at the moment slice::as_chunks_mut() producing slower code
-        if chunk.len() == STRIDE {
+        if chunk.len() == LANES * 2 {
             let v = u64x8::splat(pl.next) + PROGRESSION;
-            chunk[0..LANES].copy_from_slice(v.as_array());
+            chunk[..LANES].copy_from_slice(v.as_array());
 
             let v = v + lanes_offset;
             chunk[LANES..].copy_from_slice(v.as_array());
         } else {
-            for (item, add) in chunk.iter_mut().zip(0..STRIDE) {
-                *item = pl.next + add as u64;
+            let len = chunk.len();
+            for (item, offset) in chunk.iter_mut().zip(0..len) {
+                *item = pl.next + offset as u64;
             }
         }
         pl.next += chunk.len() as u64;
@@ -590,7 +631,7 @@ fn next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 }
 
 #[inline]
-fn next_batch_v7(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn next_batch_simd_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     if pl.next >= pl.end {
         return 0;
@@ -631,26 +672,32 @@ impl PostingListDecoder for RangePostingList {
     }
 
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
-        // 1.65GElem/s
+        // 1.80GElem/s
         // next_batch_scalar(self, target, buffer)
 
-        // 1.79GElem/s
+        // 1.97GElem/s
         // next_batch_v2(self, target, buffer)
 
-        // 3.04GElem/s
+        // 3.23GElem/s
         // next_batch_v3(self, target, buffer)
 
-        // 3.74GElem/s
+        // 3.98GElem/s
         // next_batch_v4(self, target, buffer)
 
-        // 3.52GElem/s using
+        // 3.61GElem/s using
         // next_batch_v5(self, target, buffer)
 
-        // 4.40GElem/s using
-        next_batch_v6(self, target, buffer)
+        // 3.5GElem/s using
+        // next_batch_v6(self, target, buffer)
+
+        // 3.5GElem/s using
+        next_batch_v7(self, target, buffer)
+
+        // 4.70GElem/s using
+        // next_batch_simd(self, target, buffer)
 
         // 4.20GElem/s using
-        // next_batch_v7(self, target, buffer)
+        // next_batch_simd_v2(self, target, buffer)
     }
 }
 
