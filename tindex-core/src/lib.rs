@@ -443,266 +443,307 @@ impl RangePostingList {
     pub fn len(&self) -> u64 {
         self.end - self.next
     }
-}
 
-#[inline]
-fn _next_batch_scalar(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    let start = pl.next;
-    if start >= pl.end {
-        return 0;
-    }
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
-
-    for i in 0..len {
-        buffer[i] = pl.next;
-        pl.next += 1;
-    }
-
-    len
-}
-
-#[inline]
-fn _next_batch_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    if pl.next >= pl.end {
-        return 0;
-    }
-
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
-
-    for (i, item) in buffer[..len].iter_mut().enumerate() {
-        *item = pl.next + i as u64;
-    }
-
-    pl.next += len as u64;
-
-    len
-}
-
-#[inline]
-fn _next_batch_v3(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    if pl.next >= pl.end {
-        return 0;
-    }
-
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
-
-    for chunk in buffer[..len].chunks_mut(16) {
-        for (i, item) in chunk.iter_mut().enumerate() {
-            *item = pl.next + i as u64;
+    #[inline]
+    fn _next_batch_scalar(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        let start = self.next;
+        if start >= self.end {
+            return 0;
         }
-        pl.next += chunk.len() as u64;
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        for i in 0..len {
+            buffer[i] = self.next;
+            self.next += 1;
+        }
+
+        len
     }
 
-    len
-}
+    #[inline]
+    fn _next_batch_v2(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
+        }
 
-#[inline]
-fn _next_batch_v4(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    pl.next = pl.next.max(target);
-    if pl.next >= pl.end {
-        return 0;
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        for (i, item) in buffer[..len].iter_mut().enumerate() {
+            *item = self.next + i as u64;
+        }
+
+        self.next += len as u64;
+
+        len
     }
 
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
+    #[inline]
+    fn _next_batch_v3(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
+        }
 
-    for chunk in buffer[..len].chunks_mut(PROGRESSION.len()) {
-        if chunk.len() == PROGRESSION.len() {
-            for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
-                *item = pl.next + offset;
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        for chunk in buffer[..len].chunks_mut(16) {
+            for item in chunk.iter_mut() {
+                *item = self.next + self.next;
+                self.next += 1;
             }
+        }
+
+        len
+    }
+
+    #[inline]
+    fn _next_batch_v4(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
+        }
+
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        for chunk in buffer[..len].chunks_mut(PROGRESSION.len()) {
+            if chunk.len() == PROGRESSION.len() {
+                for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
+                    *item = self.next + offset;
+                }
+            } else {
+                for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
+                    *item = self.next + offset;
+                }
+            }
+            self.next += chunk.len() as u64;
+        }
+
+        len
+    }
+
+    #[inline]
+    fn _next_batch_v5(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
+        }
+
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        let (chunks, remainder) = buffer[..len].as_chunks_mut::<16>();
+        for chunk in chunks {
+            for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
+                *item = self.next + offset;
+            }
+            self.next += chunk.len() as u64;
+        }
+
+        for (item, offset) in remainder.iter_mut().zip(PROGRESSION) {
+            *item = self.next + offset;
+        }
+        self.next += remainder.len() as u64;
+
+        len
+    }
+
+    #[inline]
+    fn _next_batch_v6(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        let start = self.next;
+        if start >= self.end {
+            return 0;
+        }
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        for i in buffer[..len].iter_mut() {
+            *i = self.next;
+
+            self.next += 1;
+        }
+
+        len
+    }
+
+    #[inline]
+    fn _next_batch_v7(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        let start = self.next;
+        if start >= self.end {
+            return 0;
+        }
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        for i in 0..len {
+            unsafe {
+                *buffer.get_unchecked_mut(i) = self.next;
+            }
+            self.next += 1;
+        }
+
+        len
+    }
+
+    #[inline]
+    fn _next_batch_simd(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
+        }
+
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
+        const LANES: usize = PROGRESSION.lanes();
+        let lanes_offset = u64x8::splat(LANES as u64);
+
+        for chunk in buffer[..len].chunks_mut(LANES * 2) {
+            // This code duplication is required for compiler to vectorize code
+            // at the moment slice::as_chunks_mut() producing slower code
+            if chunk.len() == LANES * 2 {
+                let v = u64x8::splat(self.next) + PROGRESSION;
+                chunk[..LANES].copy_from_slice(v.as_array());
+
+                let v = v + lanes_offset;
+                chunk[LANES..].copy_from_slice(v.as_array());
+            } else {
+                let len = chunk.len();
+                for (item, offset) in chunk.iter_mut().zip(0..len) {
+                    *item = self.next + offset as u64;
+                }
+            }
+            self.next += chunk.len() as u64;
+        }
+
+        len
+    }
+
+    #[inline]
+    fn _next_batch_simd_v3(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
+        }
+
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
+
+        if len == 16 {
+            // Specialization for 16 bytes
+            const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
+            const LANES: usize = PROGRESSION.lanes();
+
+            let lanes_offset = u64x8::splat(LANES as u64);
+
+            let low = u64x8::splat(self.next) + PROGRESSION;
+            let high = low + lanes_offset;
+
+            buffer[..LANES].copy_from_slice(low.as_array());
+            buffer[LANES..].copy_from_slice(high.as_array());
+
+            self.next += len as u64;
         } else {
-            for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
-                *item = pl.next + offset;
+            for chunk in buffer[..len].chunks_mut(8) {
+                // This code duplication is required for compiler to vectorize code
+                // at the moment slice::as_chunks_mut() producing slower code
+                let len = chunk.len();
+                for (item, offset) in chunk.iter_mut().zip(0..len) {
+                    *item = self.next + offset as u64;
+                }
+
+                self.next += len as u64;
             }
         }
-        pl.next += chunk.len() as u64;
+
+        len
     }
 
-    len
-}
-
-#[inline]
-fn _next_batch_v5(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
-    pl.next = pl.next.max(target);
-    if pl.next >= pl.end {
-        return 0;
-    }
-
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
-
-    let (chunks, remainder) = buffer[..len].as_chunks_mut::<16>();
-    for chunk in chunks {
-        for (item, offset) in chunk.iter_mut().zip(PROGRESSION) {
-            *item = pl.next + offset;
+    #[inline]
+    fn _next_batch_simd_v4(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
         }
-        pl.next += chunk.len() as u64;
-    }
 
-    for (item, offset) in remainder.iter_mut().zip(PROGRESSION) {
-        *item = pl.next + offset;
-    }
-    pl.next += remainder.len() as u64;
+        const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
+        const LANES: usize = PROGRESSION.lanes();
+        const SPEC_LENGTH: usize = LANES * 2;
+        if buffer.len() == SPEC_LENGTH && (self.next + SPEC_LENGTH as u64) <= self.end {
+            // Specialization for 16 elements
+            let low = u64x8::splat(self.next) + PROGRESSION;
+            buffer[..LANES].copy_from_slice(low.as_array());
 
-    len
-}
+            let high = low + u64x8::splat(LANES as u64);
+            buffer[LANES..].copy_from_slice(high.as_array());
 
-#[inline]
-fn _next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    let start = pl.next;
-    if start >= pl.end {
-        return 0;
-    }
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
+            self.next += SPEC_LENGTH as u64;
 
-    for i in buffer[..len].iter_mut() {
-        *i = pl.next;
+            SPEC_LENGTH
+        } else {
+            let range_len = (self.end - self.next) as usize;
+            let len = range_len.min(buffer.len());
 
-        pl.next += 1;
-    }
+            for chunk in buffer[..len].chunks_mut(8) {
+                // This code duplication is required for compiler to vectorize code
+                // at the moment slice::as_chunks_mut() producing slower code
+                let len = chunk.len();
+                for (item, offset) in chunk.iter_mut().zip(0..len) {
+                    *item = self.next + offset as u64;
+                }
 
-    len
-}
+                self.next += len as u64;
+            }
 
-#[inline]
-fn _next_batch_v7(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    let start = pl.next;
-    if start >= pl.end {
-        return 0;
-    }
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
-
-    for i in 0..len {
-        unsafe {
-            *buffer.get_unchecked_mut(i) = pl.next;
+            len
         }
-        pl.next += 1;
     }
 
-    len
-}
+    #[inline]
+    fn _next_batch_simd_v2(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
+        self.next = self.next.max(target);
+        if self.next >= self.end {
+            return 0;
+        }
 
-#[inline]
-fn _next_batch_simd(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    if pl.next >= pl.end {
-        return 0;
-    }
+        let range_len = (self.end - self.next) as usize;
+        let len = range_len.min(buffer.len());
 
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
+        const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
+        const LANES: usize = PROGRESSION.lanes();
+        const STRIDE: usize = PROGRESSION.lanes() * 2;
+        let lanes_offset = u64x8::splat(LANES as u64);
 
-    const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
-    const LANES: usize = PROGRESSION.lanes();
-    let lanes_offset = u64x8::splat(LANES as u64);
+        let (chunks, remainder) = buffer[..len].as_chunks_mut::<16>();
 
-    for chunk in buffer[..len].chunks_mut(LANES * 2) {
-        // This code duplication is required for compiler to vectorize code
-        // at the moment slice::as_chunks_mut() producing slower code
-        if chunk.len() == LANES * 2 {
-            let v = u64x8::splat(pl.next) + PROGRESSION;
-            chunk[..LANES].copy_from_slice(v.as_array());
+        for chunk in chunks {
+            let v = u64x8::splat(self.next) + PROGRESSION;
+            chunk[0..LANES].copy_from_slice(v.as_array());
 
             let v = v + lanes_offset;
             chunk[LANES..].copy_from_slice(v.as_array());
-        } else {
-            let len = chunk.len();
-            for (item, offset) in chunk.iter_mut().zip(0..len) {
-                *item = pl.next + offset as u64;
-            }
+
+            self.next += chunk.len() as u64;
         }
-        pl.next += chunk.len() as u64;
-    }
 
-    len
-}
-
-#[inline]
-fn _next_batch_simd_v3(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    if pl.next >= pl.end {
-        return 0;
-    }
-
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
-
-    if len == 16 {
-        const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
-        const LANES: usize = PROGRESSION.lanes();
-
-        let lanes_offset = u64x8::splat(LANES as u64);
-
-        let low = u64x8::splat(pl.next) + PROGRESSION;
-        let high = low + lanes_offset;
-
-        buffer[..LANES].copy_from_slice(low.as_array());
-        buffer[LANES..].copy_from_slice(high.as_array());
-
-        pl.next += len as u64;
-    } else {
-        for chunk in buffer[..len].chunks_mut(16) {
-            // This code duplication is required for compiler to vectorize code
-            // at the moment slice::as_chunks_mut() producing slower code
-            let len = chunk.len();
-            for (item, offset) in chunk.iter_mut().zip(0..len) {
-                *item = pl.next + offset as u64;
-            }
-
-            pl.next += len as u64;
+        for (item, add) in remainder.iter_mut().zip(0..STRIDE) {
+            *item = self.next + add as u64;
         }
+
+        self.next += remainder.len() as u64;
+
+        len
     }
-
-    len
-}
-
-#[inline]
-fn _next_batch_simd_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
-    pl.next = pl.next.max(target);
-    if pl.next >= pl.end {
-        return 0;
-    }
-
-    let range_len = (pl.end - pl.next) as usize;
-    let len = range_len.min(buffer.len());
-
-    const PROGRESSION: u64x8 = u64x8::from_array([0, 1, 2, 3, 4, 5, 6, 7]);
-    const LANES: usize = PROGRESSION.lanes();
-    const STRIDE: usize = PROGRESSION.lanes() * 2;
-    let lanes_offset = u64x8::splat(LANES as u64);
-
-    let (chunks, remainder) = buffer[..len].as_chunks_mut::<16>();
-
-    for chunk in chunks {
-        let v = u64x8::splat(pl.next) + PROGRESSION;
-        chunk[0..LANES].copy_from_slice(v.as_array());
-
-        let v = v + lanes_offset;
-        chunk[LANES..].copy_from_slice(v.as_array());
-
-        pl.next += chunk.len() as u64;
-    }
-
-    for (item, add) in remainder.iter_mut().zip(0..STRIDE) {
-        *item = pl.next + add as u64;
-    }
-
-    pl.next += remainder.len() as u64;
-
-    len
 }
 
 impl PostingListDecoder for RangePostingList {
@@ -712,34 +753,37 @@ impl PostingListDecoder for RangePostingList {
 
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
         // 1.80GElem/s
-        // _next_batch_scalar(self, target, buffer)
+        // self._next_batch_scalar(target, buffer)
 
         // 1.97GElem/s
-        // _next_batch_v2(self, target, buffer)
+        // self._next_batch_v2(target, buffer)
 
-        // 3.23GElem/s
-        // _next_batch_v3(self, target, buffer)
+        // 2.6GElem/s
+        // self._next_batch_v3(target, buffer)
 
         // 3.98GElem/s
-        // _next_batch_v4(self, target, buffer)
+        // self._next_batch_v4(target, buffer)
 
         // 3.61GElem/s using
-        // _next_batch_v5(self, target, buffer)
+        // self._next_batch_v5(target, buffer)
 
         // 3.5GElem/s using
-        // _next_batch_v6(self, target, buffer)
+        // self._next_batch_v6(target, buffer)
 
         // 3.5GElem/s using
-        // _next_batch_v7(self, target, buffer)
+        // self._next_batch_v7(target, buffer)
 
         // 4.70GElem/s using
-        // _next_batch_simd(self, target, buffer)
+        // self._next_batch_simd(target, buffer)
 
         // 4.20GElem/s using
-        // _next_batch_simd_v2(self, target, buffer)
+        // self._next_batch_simd_v2(target, buffer)
 
-        // 6+GElem/s using
-        _next_batch_simd_v3(self, target, buffer)
+        // 6.3GElem/s using
+        // self._next_batch_simd_v3(target, buffer)
+
+        // 7.0GElem/s using
+        self._next_batch_simd_v4(target, buffer)
     }
 }
 
@@ -749,7 +793,7 @@ mod tests {
     use rand::prelude::*;
     use rand::Fill;
     use rand::SeedableRng;
-    use std::arch::x86_64::{_mm512_set1_epi64, _mm512_slli_epi64, _mm512_store_epi64};
+
     use std::fmt::Debug;
     use std::panic;
     use std::panic::RefUnwindSafe;
