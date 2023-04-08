@@ -14,33 +14,24 @@ pub fn range_sum(c: &mut Criterion) {
     g.throughput(Throughput::Elements(size));
 
     g.bench_function("Sum simple", |bench| {
-        bench.iter_batched(
-            || a.clone(),
-            |v| traverse_simple(&v[..]),
-            BatchSize::SmallInput,
-        );
+        bench.iter_batched(|| &a[..], traverse_simple, BatchSize::SmallInput);
+    });
+
+    g.bench_function("Sum indexed", |bench| {
+        bench.iter_batched(|| &a[..], traverse_indexed, BatchSize::SmallInput);
     });
 
     g.bench_function("Sum unrolled", |bench| {
-        bench.iter_batched(
-            || a.clone(),
-            |v| traverse_unrolled(&v[..]),
-            BatchSize::SmallInput,
-        );
+        bench.iter_batched(|| &a[..], traverse_unrolled, BatchSize::SmallInput);
     });
 
     g.bench_function("Sum lib", |bench| {
-        bench.iter_batched(
-            || a.clone(),
-            |v| traverse_lib(&v[..]),
-            BatchSize::SmallInput,
-        );
+        bench.iter_batched(|| &a[..], traverse_lib, BatchSize::SmallInput);
     });
 
     g.finish();
 }
 
-#[inline(never)]
 fn traverse_simple(input: &[u64]) -> u64 {
     let mut a = 0;
     for i in input {
@@ -49,12 +40,18 @@ fn traverse_simple(input: &[u64]) -> u64 {
     a
 }
 
-#[inline(never)]
+fn traverse_indexed(input: &[u64]) -> u64 {
+    let mut a = 0;
+    for i in 0..input.len() {
+        a += input[i];
+    }
+    a
+}
+
 fn traverse_lib(input: &[u64]) -> u64 {
     input.iter().sum()
 }
 
-#[inline(never)]
 fn traverse_unrolled(input: &[u64]) -> u64 {
     let mut a = 0;
     let mut b = 0;
