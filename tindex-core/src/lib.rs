@@ -4,7 +4,7 @@
 
 use lazy_static::lazy_static;
 use std::{
-    ops::{AddAssign, Range, Shr, ShrAssign},
+    ops::Range,
     simd::{u64x4, u64x8, usizex4, SimdPartialEq, ToBitMask},
 };
 
@@ -446,7 +446,7 @@ impl RangePostingList {
 }
 
 #[inline]
-fn next_batch_scalar(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_scalar(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     let start = pl.next;
     if start >= pl.end {
@@ -464,7 +464,7 @@ fn next_batch_scalar(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuff
 }
 
 #[inline]
-fn next_batch_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     if pl.next >= pl.end {
         return 0;
@@ -483,7 +483,7 @@ fn next_batch_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 }
 
 #[inline]
-fn next_batch_v3(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_v3(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     if pl.next >= pl.end {
         return 0;
@@ -503,7 +503,7 @@ fn next_batch_v3(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 }
 
 #[inline]
-fn next_batch_v4(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_v4(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     pl.next = pl.next.max(target);
     if pl.next >= pl.end {
@@ -530,7 +530,7 @@ fn next_batch_v4(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 }
 
 #[inline]
-fn next_batch_v5(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_v5(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     const PROGRESSION: [u64; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     pl.next = pl.next.max(target);
     if pl.next >= pl.end {
@@ -557,7 +557,7 @@ fn next_batch_v5(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 }
 
 #[inline]
-fn next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     let start = pl.next;
     if start >= pl.end {
@@ -576,7 +576,7 @@ fn next_batch_v6(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 }
 
 #[inline]
-fn next_batch_v7(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_v7(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     let start = pl.next;
     if start >= pl.end {
@@ -596,7 +596,7 @@ fn next_batch_v7(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) 
 }
 
 #[inline]
-fn next_batch_simd(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_simd(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     if pl.next >= pl.end {
         return 0;
@@ -631,7 +631,7 @@ fn next_batch_simd(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer
 }
 
 #[inline]
-fn next_batch_simd_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
+fn _next_batch_simd_v2(pl: &mut RangePostingList, target: u64, buffer: &mut PlBuffer) -> usize {
     pl.next = pl.next.max(target);
     if pl.next >= pl.end {
         return 0;
@@ -673,31 +673,31 @@ impl PostingListDecoder for RangePostingList {
 
     fn next_batch_advance(&mut self, target: u64, buffer: &mut PlBuffer) -> usize {
         // 1.80GElem/s
-        // next_batch_scalar(self, target, buffer)
+        // _next_batch_scalar(self, target, buffer)
 
         // 1.97GElem/s
-        // next_batch_v2(self, target, buffer)
+        // _next_batch_v2(self, target, buffer)
 
         // 3.23GElem/s
-        // next_batch_v3(self, target, buffer)
+        // _next_batch_v3(self, target, buffer)
 
         // 3.98GElem/s
-        // next_batch_v4(self, target, buffer)
+        // _next_batch_v4(self, target, buffer)
 
         // 3.61GElem/s using
-        // next_batch_v5(self, target, buffer)
+        // _next_batch_v5(self, target, buffer)
 
         // 3.5GElem/s using
-        // next_batch_v6(self, target, buffer)
+        // _next_batch_v6(self, target, buffer)
 
         // 3.5GElem/s using
-        next_batch_v7(self, target, buffer)
+        // _next_batch_v7(self, target, buffer)
 
         // 4.70GElem/s using
-        // next_batch_simd(self, target, buffer)
+        _next_batch_simd(self, target, buffer)
 
         // 4.20GElem/s using
-        // next_batch_simd_v2(self, target, buffer)
+        // _next_batch_simd_v2(self, target, buffer)
     }
 }
 
@@ -707,6 +707,7 @@ mod tests {
     use rand::prelude::*;
     use rand::Fill;
     use rand::SeedableRng;
+    use std::arch::x86_64::{_mm512_set1_epi64, _mm512_slli_epi64, _mm512_store_epi64};
     use std::fmt::Debug;
     use std::panic;
     use std::panic::RefUnwindSafe;
@@ -766,7 +767,7 @@ mod tests {
 
     #[test]
     fn check_intersect_massive() {
-        let seed = [
+        let _seed = [
             158, 89, 10, 112, 64, 144, 165, 151, 72, 60, 206, 33, 109, 239, 68, 78, 118, 187, 237,
             203, 159, 240, 236, 12, 175, 97, 49, 240, 63, 199, 149, 83,
         ];
@@ -899,6 +900,17 @@ mod tests {
         let mask = MASKS[10]; // 0101
         a.scatter(&mut output, mask);
         assert_eq!(output, [2, 4, 0, 0]);
+    }
+
+    #[test]
+    fn check_simd_prefix_sum() {
+        unsafe {
+            let mut out = [0u64; 8];
+            let a = _mm512_set1_epi64(1);
+            let b = _mm512_slli_epi64(a, 2);
+            _mm512_store_epi64(out.as_mut_ptr() as *mut i64, b);
+            assert_eq!(out, [0, 1, 1, 1, 1, 1, 1, 1]);
+        }
     }
 
     #[test]
