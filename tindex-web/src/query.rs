@@ -34,7 +34,7 @@ fn visit(node: Ast, index: &impl Index) -> Result<PostingList> {
         Ast::Ident(name) => index.lookup(&name)?.into(),
         Ast::Exclude(lv, rv) => Exclude(visit(*lv, index)?, visit(*rv, index)?).into(),
         Ast::Merge(lv, rv) => Merge(visit(*lv, index)?, visit(*rv, index)?).into(),
-        Ast::Intersect(lv, rv) => unimplemented!(),
+        Ast::Intersect(_lv, _rv) => unimplemented!(),
     };
     Ok(result)
 }

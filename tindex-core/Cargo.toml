@@ -17,3 +17,7 @@ tempfile = "3.3"
 [[bench]]
 harness = false
 name = "intersect"
+
+[[bench]]
+harness = false
+name = "simple"
